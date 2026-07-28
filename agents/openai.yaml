@@ -1,0 +1,4 @@
+interface:
+  display_name: "XHS URL Video Capture"
+  short_description: "Capture an XHS post and local transcript into Markdown."
+  default_prompt: "Capture this Xiaohongshu URL into one Markdown report:"

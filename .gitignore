@@ -1,0 +1,9 @@
+.venv/
+.runtime/
+output/
+__pycache__/
+*.mp4
+*.png
+*.jpg
+*.jpeg
+*.json
