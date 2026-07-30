@@ -203,7 +203,7 @@ def _normalize(note: dict, source: dict) -> dict:
 
 def cover_candidates(note: dict) -> list[dict]:
     """Return direct cover URLs already exposed by the selected note object."""
-    candidates: list[dict] = []
+    candidates: list[tuple[int, dict]] = []
     seen: set[str] = set()
     for image_index, image in enumerate(note.get("imageList") or note.get("image_list") or []):
         if not isinstance(image, dict):
@@ -214,10 +214,11 @@ def cover_candidates(note: dict) -> list[dict]:
             for key in ("url", "urlDefault", "url_default"):
                 url = info.get(key)
                 if isinstance(url, str) and url.startswith(("http://", "https://")) and url not in seen:
-                    candidates.append({"url": url, "source_path": f"imageList.{image_index}.infoList.{info_index}.{key}"})
+                    quality = 0 if "dft" in url.lower() or str(info.get("imageScene", "")).upper() == "WB_DFT" else 1
+                    candidates.append((quality, {"url": url, "source_path": f"imageList.{image_index}.infoList.{info_index}.{key}"}))
                     seen.add(url)
                     break
-    return candidates
+    return [candidate for _, candidate in sorted(candidates, key=lambda item: item[0])]
 
 
 def _video_candidates(note: dict) -> list[dict]:

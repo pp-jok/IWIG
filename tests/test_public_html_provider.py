@@ -16,8 +16,8 @@ class CoverCandidateTests(unittest.TestCase):
         note = {
             "imageList": [
                 {"infoList": [
-                    {"url": "https://cdn.example/cover.webp", "imageScene": "WB_PRV"},
-                    {"urlDefault": "https://cdn.example/cover-default.webp", "imageScene": "WB_DFT"},
+                    {"url": "https://cdn.example/cover!nd_prv_wlteh_jpg_3", "imageScene": "WB_PRV"},
+                    {"urlDefault": "https://cdn.example/cover-default!nd_dft_wlteh_jpg_3", "imageScene": "WB_DFT"},
                 ]}
             ],
             "video": {"image": {"thumbnailFileid": "frame/only-a-file-id.webp"}},
@@ -26,8 +26,8 @@ class CoverCandidateTests(unittest.TestCase):
         self.assertEqual(
             cover_candidates(note),
             [
-                {"url": "https://cdn.example/cover.webp", "source_path": "imageList.0.infoList.0.url"},
-                {"url": "https://cdn.example/cover-default.webp", "source_path": "imageList.0.infoList.1.urlDefault"},
+                {"url": "https://cdn.example/cover-default!nd_dft_wlteh_jpg_3", "source_path": "imageList.0.infoList.1.urlDefault"},
+                {"url": "https://cdn.example/cover!nd_prv_wlteh_jpg_3", "source_path": "imageList.0.infoList.0.url"},
             ],
         )
 
