@@ -20,7 +20,7 @@ def main() -> int:
     root = Path(__file__).resolve().parents[1]
     subprocess.run([str(python), "-m", "pip", "install", "--upgrade", "pip"], check=True)
     subprocess.run([str(python), "-m", "pip", "install", "-r", str(root / "requirements.txt"), "-r", str(root / "requirements-local-asr.txt")], check=True)
-    print(f"Setup complete. Next: {root / 'scripts' / 'start_chrome.sh'}")
+    print(f"Setup complete. Run: {python} {root / 'scripts' / 'run_capture.py'} --url '<XHS_NOTE_URL>'")
     return 0
 
 
