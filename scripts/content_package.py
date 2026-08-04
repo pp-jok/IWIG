@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import subprocess
 from pathlib import Path
 
 
@@ -90,6 +91,15 @@ def extract_keyframes(path: Path, destination: Path, interval_seconds: int = 30,
         return {"status": "available", "frames": saved}
     except Exception as error:
         return {"status": "failed", "reason": type(error).__name__, "frames": []}
+
+
+def ocr_macos(image: Path) -> dict:
+    script = Path(__file__).with_name("ocr_macos.swift")
+    try:
+        completed = subprocess.run(["/usr/bin/swift", str(script), str(image)], capture_output=True, text=True, check=True, timeout=60)
+        return {"status": "available", **json.loads(completed.stdout)}
+    except Exception as error:
+        return {"status": "failed", "reason": type(error).__name__, "text": "", "lines": []}
 
 
 def _timestamp(seconds: float) -> str:

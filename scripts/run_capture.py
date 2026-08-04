@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from public_html_provider import PublicCaptureError, capture_public_note, note_id_from_url
-from content_package import extract_keyframes, field_status, find_existing_package, should_reuse, srt
+from content_package import extract_keyframes, field_status, find_existing_package, ocr_macos, should_reuse, srt
 
 
 def transcribe(video: Path) -> list[dict]:
@@ -39,6 +39,7 @@ def main() -> int:
     parser.add_argument("--max-video-mb", type=int, default=300)
     parser.add_argument("--force", action="store_true", help="Capture again even if the direct note ID already exists")
     parser.add_argument("--keyframes", action="store_true", help="Extract local representative video frames")
+    parser.add_argument("--ocr", action="store_true", help="Run local macOS Vision OCR on cover and keyframes")
     args = parser.parse_args()
     output_root = Path(args.output_dir).expanduser().resolve()
     existing = None if args.run_dir else find_existing_package(output_root, note_id_from_url(args.url))
@@ -58,6 +59,8 @@ def main() -> int:
             video = output / "media" / video_info["path"]
             if args.keyframes:
                 result["keyframes"] = extract_keyframes(video, output / "derived" / "keyframes")
+        if args.ocr and result["media"].get("cover"):
+            result["ocr"] = {"cover": ocr_macos(output / "media" / result["media"]["cover"]["path"])}
             try:
                 result["transcript"] = transcribe(video)
                 derived = output / "derived"; derived.mkdir(exist_ok=True)
