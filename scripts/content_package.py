@@ -10,6 +10,8 @@ from pathlib import Path
 def field_status(value) -> str:
     if value is None:
         return "not_exposed"
+    if isinstance(value, (list, tuple, dict, set)) and not value:
+        return "not_exposed"
     if value == 0:
         return "zero"
     return "available"

@@ -15,6 +15,7 @@ class ContentPackageTests(unittest.TestCase):
         self.assertEqual(field_status(0), "zero")
         self.assertEqual(field_status(None), "not_exposed")
         self.assertEqual(field_status("title"), "available")
+        self.assertEqual(field_status([]), "not_exposed")
 
     def test_file_record_has_size_and_hash(self):
         with tempfile.TemporaryDirectory() as temporary:
