@@ -60,7 +60,11 @@ def main() -> int:
             if args.keyframes:
                 result["keyframes"] = extract_keyframes(video, output / "derived" / "keyframes")
         if args.ocr and result["media"].get("cover"):
-            result["ocr"] = {"cover": ocr_macos(output / "media" / result["media"]["cover"]["path"])}
+            result["ocr"] = {"cover": ocr_macos(output / "media" / result["media"]["cover"]["path"]), "images": [], "keyframes": []}
+            for image in result["media"].get("images") or []:
+                result["ocr"]["images"].append({"path": image["path"], **ocr_macos(output / "media" / "images" / image["path"])})
+            for frame in (result.get("keyframes") or {}).get("frames") or []:
+                result["ocr"]["keyframes"].append({"path": frame["path"], "time_seconds": frame["time_seconds"], **ocr_macos(output / "derived" / "keyframes" / frame["path"])})
             try:
                 result["transcript"] = transcribe(video)
                 derived = output / "derived"; derived.mkdir(exist_ok=True)
