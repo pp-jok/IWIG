@@ -22,6 +22,14 @@ def validate_content_package(package: dict) -> list[str]:
     return [f"missing:{name}" for name in required if name not in package]
 
 
+def build_timeline(transcript: list[dict], frames: list[dict]) -> dict:
+    events = []
+    for index, segment in enumerate(transcript, 1):
+        attached = [frame for frame in frames if segment["start"] <= frame.get("time_seconds", -1) <= segment["end"]]
+        events.append({"segment_id": f"seg-{index:03}", "start": segment["start"], "end": segment["end"], "speech": segment.get("text", ""), "frames": attached})
+    return {"events": events}
+
+
 def find_existing_package(output_dir: Path, note_id: str | None) -> Path | None:
     if not note_id or not output_dir.is_dir():
         return None

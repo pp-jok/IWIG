@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from content_package import extract_keyframes, field_status, file_record, find_existing_package, image_metadata, select_structural_keyframes, should_reuse, srt, video_metadata
+from content_package import build_timeline, extract_keyframes, field_status, file_record, find_existing_package, image_metadata, select_structural_keyframes, should_reuse, srt, video_metadata
 
 
 class ContentPackageTests(unittest.TestCase):
@@ -67,6 +67,10 @@ class ContentPackageTests(unittest.TestCase):
         selected = select_structural_keyframes(frames, duration_seconds=90, limit=2)
         self.assertEqual([item["path"] for item in selected], ["001.jpg", "003.jpg"])
         self.assertIn("reason", selected[0])
+
+    def test_timeline_attaches_frame_to_overlapping_speech(self):
+        timeline = build_timeline([{"start": 0, "end": 5, "text": "开头"}], [{"path": "001.jpg", "time_seconds": 2, "text": "标题"}])
+        self.assertEqual(timeline["events"][0]["frames"][0]["path"], "001.jpg")
 
 
 if __name__ == "__main__":
