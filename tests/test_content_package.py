@@ -7,15 +7,21 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from content_package import build_timeline, extract_keyframes, field_status, file_record, find_existing_package, image_metadata, select_structural_keyframes, should_reuse, srt, video_metadata
+from content_package import build_timeline, extract_keyframes, field_status, file_record, find_existing_package, hash_similarity, image_metadata, new_content_package, scene_boundaries, select_structural_keyframes, should_reuse, srt, validate_content_package, video_metadata
+from build_analysis_index import build_analysis_index, validate_analysis_index
 
 
 class ContentPackageTests(unittest.TestCase):
     def test_field_status_distinguishes_zero_from_missing(self):
-        self.assertEqual(field_status(0), "zero")
-        self.assertEqual(field_status(None), "not_exposed")
-        self.assertEqual(field_status("title"), "available")
-        self.assertEqual(field_status([]), "not_exposed")
+        self.assertEqual(field_status(0)["status"], "zero")
+        self.assertEqual(field_status(None)["status"], "not_exposed")
+        self.assertEqual(field_status("title")["status"], "available")
+        self.assertEqual(field_status([])["status"], "not_exposed")
+
+    def test_all_statuses_share_a_valid_package_contract(self):
+        for status in ("completed", "partial", "failed"):
+            with self.subTest(status=status):
+                self.assertEqual(validate_content_package(new_content_package(status, "https://example.test/note")), [])
 
     def test_file_record_has_size_and_hash(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -23,6 +29,7 @@ class ContentPackageTests(unittest.TestCase):
             path.write_bytes(b"content")
             self.assertEqual(file_record(path)["size_bytes"], 7)
             self.assertEqual(file_record(path)["sha256"], hashlib.sha256(b"content").hexdigest())
+            self.assertEqual(file_record(path, Path(temporary))["path"], "item.txt")
 
     def test_srt_formats_timestamped_segments(self):
         self.assertEqual(srt([{"start": 0, "end": 1.2, "text": "你好"}]), "1\n00:00:00,000 --> 00:00:01,200\n你好\n")
@@ -71,6 +78,20 @@ class ContentPackageTests(unittest.TestCase):
     def test_timeline_attaches_frame_to_overlapping_speech(self):
         timeline = build_timeline([{"start": 0, "end": 5, "text": "开头"}], [{"path": "001.jpg", "time_seconds": 2, "text": "标题"}])
         self.assertEqual(timeline["events"][0]["frames"][0]["path"], "001.jpg")
+
+    def test_scene_boundaries_report_visual_change(self):
+        frames = [{"path": "001.jpg", "perceptual_hash": "0000000000000000"}, {"path": "002.jpg", "perceptual_hash": "ffffffffffffffff"}]
+        self.assertEqual(len(scene_boundaries(frames, threshold=.8)), 2)
+        self.assertEqual(frames[1]["adjacent_similarity"], 0.0)
+        self.assertEqual(hash_similarity("0000000000000000", "ffffffffffffffff"), 0.0)
+
+    def test_analysis_index_is_local_and_valid(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary); package = new_content_package("partial", "https://example.test/note")
+            (run / "content_package.json").write_text(__import__("json").dumps(package), encoding="utf-8")
+            index = build_analysis_index(run)
+            self.assertEqual(validate_analysis_index(index), [])
+            self.assertTrue(index["quality"]["package_valid"])
 
 
 if __name__ == "__main__":

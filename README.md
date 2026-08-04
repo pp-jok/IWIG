@@ -11,7 +11,7 @@
 - 视频笔记：视频、封面、文件哈希、时长、分辨率、编码、本地转写、时间戳分段、SRT。
 - 图文笔记：公开暴露的全部图片按原始顺序保存，并记录 PNG、JPEG、WebP 的尺寸、格式与哈希。
 - 可选本地视觉处理：关键帧、macOS Vision OCR、封面/图文页/关键帧文字。
-- 保存公开 HTML、初始化数据、候选地址、实际使用媒体地址、完整度与限制说明。
+- 默认保存选中的笔记对象、请求元数据、候选地址、实际使用媒体地址、完整度与限制说明；完整 HTML 与初始化数据仅在 `--keep-raw-source` 时保存。
 - 允许补处理已有内容包，不需要再次请求小红书或下载媒体。
 
 ## 安装
@@ -50,16 +50,25 @@ python3 scripts/setup.py
 <RUN_ID>/
   content_package.json       # 供其他 Skill 使用的结构化接口
   report.md                  # 人读摘要、完整度与限制
-  source/                    # HTML、初始化数据、媒体候选
+  source/                    # 默认的选中笔记、请求元数据、媒体候选（可选原始 HTML/状态）
   media/                     # 视频、封面或有序图文页
   derived/                   # 转写、SRT、关键帧
 ```
 
-`content_package.json` 会区分 `available`、`zero`、`not_exposed`、`failed`、`not_run` 与 `intentionally_not_collected`，避免把缺失数据误判为零。
+`content_package.json` 的每个完整度项都是 `{status,count,reason}`，会区分 `available`、`zero`、`not_exposed`、`failed`、`not_run` 与 `intentionally_omitted`，避免把缺失数据误判为零。媒体路径始终相对运行目录。
+
+可离线生成面向分析 Skill 的投影（不会请求网络）：
+
+```bash
+~/.xhs-url-video-capture/.venv/bin/python scripts/build_analysis_index.py --run-dir <RUN_ID>
+```
+
+它生成 `derived/analysis_index.json`，包含文字、媒体、时间线、来源字段、质量摘要及缺失警告。
 
 ## 限制
 
 - 每次仅处理一条用户提供的公开链接；遇到登录、验证、限流或无法访问即停止。
+- 页面与媒体重定向逐跳进行 URL、DNS/IP 与五跳上限校验；报告会隐藏 token 类查询参数。
 - 不采集评论正文、二级回复、作者主页深度信息、未加载或推荐内容。
 - 只使用页面当前直接暴露的完整媒体 URL，不猜测地址、不补签名。
 - 本地转写与 OCR 均可能存在识别误差；OCR 仅支持 macOS Vision，首次调用可能需要编译 Swift 工具。

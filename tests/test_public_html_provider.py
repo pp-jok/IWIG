@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from public_html_provider import PublicCaptureError, cover_candidates, image_candidates, request_error
+from public_html_provider import PublicCaptureError, _request_with_validated_redirects, cover_candidates, image_candidates, redact_url, request_error
 sys.path.insert(0, str(ROOT / "scripts"))
 from run_capture import render_public_report
 
@@ -59,9 +59,10 @@ class PublicReportTests(unittest.TestCase):
         self.assertIn("获取完整度", report)
         self.assertIn("comments：intentionally_not_collected", report)
 
-    def test_transcription_is_not_nested_under_ocr(self):
+    def test_transcription_stage_is_independent_of_ocr(self):
         source = (ROOT / "scripts" / "run_capture.py").read_text(encoding="utf-8")
-        self.assertLess(source.index("result[\"transcript\"] = transcribe(video)"), source.rindex("if args.ocr"))
+        self.assertIn("def process_transcript", source)
+        self.assertIn("process_transcript(result, run)", source)
 
 
 class BrowserRemovalTests(unittest.TestCase):
@@ -84,6 +85,31 @@ class TransportErrorTests(unittest.TestCase):
         mapped = request_error(OSError("dns unavailable"))
         self.assertIsInstance(mapped, PublicCaptureError)
         self.assertEqual(str(mapped), "public_page_request_failed")
+
+
+class RedirectSafetyTests(unittest.TestCase):
+    class Response:
+        def __init__(self, status, location=None):
+            self.status_code, self.headers = status, ({"location": location} if location else {})
+
+    class Client:
+        def __init__(self, responses): self.responses, self.urls = list(responses), []
+        def get(self, url, **_): self.urls.append(url); return self.responses.pop(0)
+
+    def test_redirect_to_private_target_is_rejected_before_request(self):
+        client = self.Client([self.Response(302, "http://127.0.0.1/private")])
+        with self.assertRaisesRegex(PublicCaptureError, "invalid_url"):
+            _request_with_validated_redirects(client, "https://8.8.8.8/start")
+        self.assertEqual(client.urls, ["https://8.8.8.8/start"])
+
+    def test_redirect_limit_is_enforced(self):
+        client = self.Client([self.Response(302, "/again")] * 6)
+        with self.assertRaisesRegex(PublicCaptureError, "redirect_limit_exceeded"):
+            _request_with_validated_redirects(client, "https://8.8.8.8/start")
+
+    def test_redaction_removes_share_token(self):
+        self.assertNotIn("xsec_token", redact_url("https://www.xiaohongshu.com/explore/a?xsec_token=secret&foo=ok"))
+        self.assertIn("foo=ok", redact_url("https://www.xiaohongshu.com/explore/a?xsec_token=secret&foo=ok"))
 
 
 if __name__ == "__main__":
