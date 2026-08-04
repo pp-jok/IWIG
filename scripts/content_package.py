@@ -70,6 +70,28 @@ def video_metadata(path: Path) -> dict:
         return {"status": "failed", "reason": type(error).__name__}
 
 
+def extract_keyframes(path: Path, destination: Path, interval_seconds: int = 30, max_frames: int = 12) -> dict:
+    try:
+        import av
+        destination.mkdir(parents=True, exist_ok=True)
+        saved, next_second = [], 0.0
+        with av.open(str(path)) as container:
+            stream = next(item for item in container.streams if item.type == "video")
+            for frame in container.decode(stream):
+                seconds = float(frame.time or 0)
+                if seconds < next_second:
+                    continue
+                target = destination / f"{len(saved) + 1:03}.jpg"
+                frame.to_image().save(target, quality=85)
+                saved.append({"path": target.name, "time_seconds": seconds})
+                next_second = seconds + interval_seconds
+                if len(saved) >= max_frames:
+                    break
+        return {"status": "available", "frames": saved}
+    except Exception as error:
+        return {"status": "failed", "reason": type(error).__name__, "frames": []}
+
+
 def _timestamp(seconds: float) -> str:
     milliseconds = round(seconds * 1000)
     hours, milliseconds = divmod(milliseconds, 3_600_000)

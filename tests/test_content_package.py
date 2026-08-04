@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from content_package import field_status, file_record, find_existing_package, image_metadata, should_reuse, srt, video_metadata
+from content_package import extract_keyframes, field_status, file_record, find_existing_package, image_metadata, should_reuse, srt, video_metadata
 
 
 class ContentPackageTests(unittest.TestCase):
@@ -56,6 +56,10 @@ class ContentPackageTests(unittest.TestCase):
     def test_force_disables_package_reuse(self):
         self.assertTrue(should_reuse(Path("run"), force=False))
         self.assertFalse(should_reuse(Path("run"), force=True))
+
+    def test_keyframe_extraction_reports_missing_video(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            self.assertEqual(extract_keyframes(Path("missing.mp4"), Path(temporary))["status"], "failed")
 
 
 if __name__ == "__main__":
