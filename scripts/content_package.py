@@ -96,7 +96,7 @@ def extract_keyframes(path: Path, destination: Path, interval_seconds: int = 30,
 def ocr_macos(image: Path) -> dict:
     script = Path(__file__).with_name("ocr_macos.swift")
     try:
-        completed = subprocess.run(["/usr/bin/swift", str(script), str(image)], capture_output=True, text=True, check=True, timeout=60)
+        completed = subprocess.run(["/usr/bin/swift", str(script), str(image)], capture_output=True, text=True, check=True, timeout=300)
         return {"status": "available", **json.loads(completed.stdout)}
     except Exception as error:
         return {"status": "failed", "reason": type(error).__name__, "text": "", "lines": []}
