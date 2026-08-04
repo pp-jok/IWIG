@@ -38,6 +38,12 @@ class ContentPackageTests(unittest.TestCase):
             path.write_bytes(bytes.fromhex("ffd8ffc00011080003000203011100021101031101ffd9"))
             self.assertEqual(image_metadata(path), {"format": "jpeg", "width": 2, "height": 3})
 
+    def test_image_metadata_reads_webp_vp8x_dimensions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "pixel.webp"
+            path.write_bytes(b"RIFF\x1a\x00\x00\x00WEBPVP8X" + b"\x0a\x00\x00\x00" + bytes([0, 0, 0, 0, 1, 0, 0, 2, 0, 0]))
+            self.assertEqual(image_metadata(path), {"format": "webp", "width": 2, "height": 3})
+
     def test_video_metadata_reports_unavailable_without_pyav(self):
         self.assertEqual(video_metadata(Path("missing.mp4"))["status"], "failed")
 

@@ -52,6 +52,8 @@ def image_metadata(path: Path) -> dict:
             if marker in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
                 return {"format": "jpeg", "width": int.from_bytes(header[index + 7:index + 9], "big"), "height": int.from_bytes(header[index + 5:index + 7], "big")}
             index += 2 + length
+    if header.startswith(b"RIFF") and header[8:12] == b"WEBP" and header[12:16] == b"VP8X" and len(header) >= 30:
+        return {"format": "webp", "width": int.from_bytes(header[24:27], "little") + 1, "height": int.from_bytes(header[27:30], "little") + 1}
     return {"format": path.suffix.lstrip(".").lower() or "unknown", "width": None, "height": None}
 
 
