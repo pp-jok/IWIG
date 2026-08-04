@@ -32,6 +32,12 @@ class ContentPackageTests(unittest.TestCase):
             path.write_bytes(bytes.fromhex("89504e470d0a1a0a0000000d494844520000000200000003080200000000000000"))
             self.assertEqual(image_metadata(path), {"format": "png", "width": 2, "height": 3})
 
+    def test_image_metadata_reads_jpeg_dimensions(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "pixel.jpg"
+            path.write_bytes(bytes.fromhex("ffd8ffc00011080003000203011100021101031101ffd9"))
+            self.assertEqual(image_metadata(path), {"format": "jpeg", "width": 2, "height": 3})
+
     def test_video_metadata_reports_unavailable_without_pyav(self):
         self.assertEqual(video_metadata(Path("missing.mp4"))["status"], "failed")
 

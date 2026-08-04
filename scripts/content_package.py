@@ -39,9 +39,19 @@ def file_record(path: Path) -> dict:
 
 
 def image_metadata(path: Path) -> dict:
-    header = path.read_bytes()[:32]
+    header = path.read_bytes()
     if header.startswith(b"\x89PNG\r\n\x1a\n") and header[12:16] == b"IHDR":
         return {"format": "png", "width": int.from_bytes(header[16:20], "big"), "height": int.from_bytes(header[20:24], "big")}
+    if header.startswith(b"\xff\xd8"):
+        index = 2
+        while index + 9 < len(header):
+            if header[index] != 0xFF:
+                index += 1; continue
+            marker = header[index + 1]
+            length = int.from_bytes(header[index + 2:index + 4], "big")
+            if marker in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
+                return {"format": "jpeg", "width": int.from_bytes(header[index + 7:index + 9], "big"), "height": int.from_bytes(header[index + 5:index + 7], "big")}
+            index += 2 + length
     return {"format": path.suffix.lstrip(".").lower() or "unknown", "width": None, "height": None}
 
 
