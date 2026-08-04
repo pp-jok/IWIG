@@ -355,6 +355,9 @@ def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0, max_v
         if not result["media"]["cover"] and result["media"]["images"]:
             result["media"]["cover"] = result["media"]["images"][0]
         if not result["media"]["video"] and not result["media"]["images"]:
-            raise PublicCaptureError("public_media_not_available")
+            result["errors"].append({"stage": "media_download", "code": "public_media_not_available"})
+            result["limitations"].append("public_media_not_available")
+            result["status"] = "partial"
+            return result
         result["status"] = "completed"
         return result
