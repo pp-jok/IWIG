@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
+from urllib.parse import urljoin
 from content_package import file_record, image_metadata, video_metadata
 
 
@@ -53,6 +54,20 @@ def _validate_url(url: str, public_xhs_only: bool = False) -> None:
             raise PublicCaptureError("invalid_url")
     if public_xhs_only and host not in PUBLIC_HOSTS:
         raise PublicCaptureError("invalid_url")
+
+
+def _get_public_page(client, url: str, max_redirects: int = 5):
+    current = url
+    for _ in range(max_redirects + 1):
+        _validate_url(current, public_xhs_only=True)
+        response = client.get(current, follow_redirects=False)
+        if response.status_code not in {301, 302, 303, 307, 308}:
+            return response
+        location = response.headers.get("location")
+        if not location:
+            raise PublicCaptureError("public_page_request_failed")
+        current = urljoin(current, location)
+    raise PublicCaptureError("public_page_request_failed")
 
 
 def _note_id(url: str) -> str | None:
@@ -321,9 +336,9 @@ def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0, max_v
     import httpx
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    with httpx.Client(headers={"User-Agent": USER_AGENT, "Referer": "https://www.xiaohongshu.com/"}, timeout=httpx.Timeout(timeout, connect=min(timeout, 10)), follow_redirects=True, verify=True, cookies=None) as client:
+    with httpx.Client(headers={"User-Agent": USER_AGENT, "Referer": "https://www.xiaohongshu.com/"}, timeout=httpx.Timeout(timeout, connect=min(timeout, 10)), follow_redirects=False, verify=True, cookies=None) as client:
         try:
-            response = client.get(url)
+            response = _get_public_page(client, url)
         except Exception as error:
             raise request_error(error) from error
         if response.status_code in {401, 403, 406, 429}:
