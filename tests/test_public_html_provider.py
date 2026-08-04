@@ -59,6 +59,10 @@ class PublicReportTests(unittest.TestCase):
         self.assertIn("获取完整度", report)
         self.assertIn("comments：intentionally_not_collected", report)
 
+    def test_transcription_is_not_nested_under_ocr(self):
+        source = (ROOT / "scripts" / "run_capture.py").read_text(encoding="utf-8")
+        self.assertLess(source.index("result[\"transcript\"] = transcribe(video)"), source.rindex("if args.ocr"))
+
 
 class BrowserRemovalTests(unittest.TestCase):
     def test_formal_runtime_has_no_browser_automation_references(self):

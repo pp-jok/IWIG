@@ -80,12 +80,6 @@ def main() -> int:
             video = output / "media" / video_info["path"]
             if args.keyframes:
                 result["keyframes"] = extract_keyframes(video, output / "derived" / "keyframes")
-        if args.ocr and result["media"].get("cover"):
-            result["ocr"] = {"cover": ocr_macos(output / "media" / result["media"]["cover"]["path"]), "images": [], "keyframes": []}
-            for image in result["media"].get("images") or []:
-                result["ocr"]["images"].append({"path": image["path"], **ocr_macos(output / "media" / "images" / image["path"])})
-            for frame in (result.get("keyframes") or {}).get("frames") or []:
-                result["ocr"]["keyframes"].append({"path": frame["path"], "time_seconds": frame["time_seconds"], **ocr_macos(output / "derived" / "keyframes" / frame["path"])})
             try:
                 result["transcript"] = transcribe(video)
                 derived = output / "derived"; derived.mkdir(exist_ok=True)
@@ -94,6 +88,12 @@ def main() -> int:
                 (derived / "subtitles.srt").write_text(srt(result["transcript"]), encoding="utf-8")
             except Exception as error:
                 result["limitations"].append(f"本地口播转写失败：{type(error).__name__}: {error}")
+        if args.ocr and result["media"].get("cover"):
+            result["ocr"] = {"cover": ocr_macos(output / "media" / result["media"]["cover"]["path"]), "images": [], "keyframes": []}
+            for image in result["media"].get("images") or []:
+                result["ocr"]["images"].append({"path": image["path"], **ocr_macos(output / "media" / "images" / image["path"])})
+            for frame in (result.get("keyframes") or {}).get("frames") or []:
+                result["ocr"]["keyframes"].append({"path": frame["path"], "time_seconds": frame["time_seconds"], **ocr_macos(output / "derived" / "keyframes" / frame["path"])})
         result["completeness"] = {"title": field_status(result["post"]["title"]), "description": field_status(result["post"]["description"]), "video": field_status(video_info), "images": field_status(result["media"]["images"]), "comments": "intentionally_not_collected", "transcript": field_status(result.get("transcript")) if video_info else "not_run"}
         (output / "content_package.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         report.write_text(render_public_report(result), encoding="utf-8")
