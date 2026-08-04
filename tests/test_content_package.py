@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from content_package import field_status, file_record, image_metadata, srt, video_metadata
+from content_package import field_status, file_record, find_existing_package, image_metadata, srt, video_metadata
 
 
 class ContentPackageTests(unittest.TestCase):
@@ -34,6 +34,12 @@ class ContentPackageTests(unittest.TestCase):
 
     def test_video_metadata_reports_unavailable_without_pyav(self):
         self.assertEqual(video_metadata(Path("missing.mp4"))["status"], "failed")
+
+    def test_finds_existing_package_by_note_id(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary) / "20260804-010101"; run.mkdir()
+            (run / "content_package.json").write_text('{"source":{"note_id":"abc"}}', encoding="utf-8")
+            self.assertEqual(find_existing_package(Path(temporary), "abc"), run)
 
 
 if __name__ == "__main__":

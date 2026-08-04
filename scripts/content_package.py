@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 
 
@@ -11,6 +12,18 @@ def field_status(value) -> str:
     if value == 0:
         return "zero"
     return "available"
+
+
+def find_existing_package(output_dir: Path, note_id: str | None) -> Path | None:
+    if not note_id or not output_dir.is_dir():
+        return None
+    for manifest in output_dir.glob("*/content_package.json"):
+        try:
+            if json.loads(manifest.read_text(encoding="utf-8")).get("source", {}).get("note_id") == note_id:
+                return manifest.parent
+        except (OSError, json.JSONDecodeError):
+            continue
+    return None
 
 
 def file_record(path: Path) -> dict:

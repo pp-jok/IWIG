@@ -56,6 +56,11 @@ def _note_id(url: str) -> str | None:
     return None
 
 
+def note_id_from_url(url: str) -> str | None:
+    """Return a direct note ID without requesting the page."""
+    return _note_id(url)
+
+
 class _Scripts(HTMLParser):
     def __init__(self) -> None:
         super().__init__()

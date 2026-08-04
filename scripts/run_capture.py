@@ -6,8 +6,8 @@ import argparse
 import json
 from pathlib import Path
 
-from public_html_provider import PublicCaptureError, capture_public_note
-from content_package import field_status, srt
+from public_html_provider import PublicCaptureError, capture_public_note, note_id_from_url
+from content_package import field_status, find_existing_package, srt
 
 
 def transcribe(video: Path) -> list[dict]:
@@ -38,7 +38,12 @@ def main() -> int:
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--max-video-mb", type=int, default=300)
     args = parser.parse_args()
-    output = Path(args.run_dir).expanduser().resolve() if args.run_dir else Path(args.output_dir).expanduser().resolve() / __import__("datetime").datetime.now().strftime("%Y%m%d-%H%M%S")
+    output_root = Path(args.output_dir).expanduser().resolve()
+    existing = None if args.run_dir else find_existing_package(output_root, note_id_from_url(args.url))
+    if existing:
+        print(existing / "report.md")
+        return 0
+    output = Path(args.run_dir).expanduser().resolve() if args.run_dir else output_root / __import__("datetime").datetime.now().strftime("%Y%m%d-%H%M%S")
     output.mkdir(parents=True, exist_ok=True)
     report = output / "report.md"
     if report.is_file():
