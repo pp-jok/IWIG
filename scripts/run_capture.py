@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from public_html_provider import PublicCaptureError, capture_public_note, note_id_from_url
-from content_package import extract_keyframes, field_status, find_existing_package, ocr_macos, select_structural_keyframes, should_reuse, srt
+from content_package import extract_keyframes, field_status, find_existing_package, ocr_macos, select_structural_keyframes, should_reuse, srt, validate_content_package
 
 
 def transcribe(video: Path) -> list[dict]:
@@ -101,6 +101,7 @@ def main() -> int:
             for frame in (result.get("keyframes") or {}).get("frames") or []:
                 result["ocr"]["keyframes"].append({"path": frame["path"], "time_seconds": frame["time_seconds"], **ocr_macos(output / "derived" / "keyframes" / frame["path"])})
         result["completeness"] = {"title": field_status(result["post"]["title"]), "description": field_status(result["post"]["description"]), "video": field_status(video_info), "images": field_status(result["media"]["images"]), "comments": "intentionally_not_collected", "transcript": field_status(result.get("transcript")) if video_info else "not_run"}
+        result["errors"].extend({"stage": "schema", "code": item} for item in validate_content_package(result))
         (output / "content_package.json").write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         report.write_text(render_public_report(result), encoding="utf-8")
         print(report)

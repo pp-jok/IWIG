@@ -17,6 +17,11 @@ def field_status(value) -> str:
     return "available"
 
 
+def validate_content_package(package: dict) -> list[str]:
+    required = ("schema_version", "status", "source", "post", "media", "errors", "limitations")
+    return [f"missing:{name}" for name in required if name not in package]
+
+
 def find_existing_package(output_dir: Path, note_id: str | None) -> Path | None:
     if not note_id or not output_dir.is_dir():
         return None
