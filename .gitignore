@@ -1,5 +1,6 @@
 .venv/
 .runtime/
+.worktrees/
 output/
 __pycache__/
 *.mp4
@@ -7,3 +8,4 @@ __pycache__/
 *.jpg
 *.jpeg
 *.json
+experiments/public_html_capture_mvp/artifacts/
