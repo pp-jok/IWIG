@@ -1,6 +1,6 @@
 # XHS URL Video Capture
 
-一个 macOS 专用的 Codex Skill：只通过小红书公开 HTML 获取单条笔记信息、直接视频、直接提供的封面和本地口播转写，并输出 Markdown 报告。
+一个 macOS 专用的 Codex Skill：只通过小红书公开 HTML 将单条视频或图文笔记转换为可复用的本地内容包。
 
 不使用浏览器自动化、Chrome、Cookie、登录、JavaScript 执行、私有 API 或签名生成；也不采集评论正文或二级回复。
 
@@ -10,7 +10,7 @@
 - 提取标题、作者、正文、标签和公开互动数快照。
 - 下载当前笔记对象中直接给出的 MP4 候选及封面图片候选。
 - 对已下载视频使用本地 `faster-whisper` 生成口播稿。
-- 保存结构化 JSON、HTML、候选列表、视频、封面和 `post_and_transcript.md`。
+- 保存 `content_package.json`、`report.md`、HTML、初始化数据、媒体候选、视频/封面或有序图片；视频还可输出本地时间戳口播和 SRT 字幕。
 
 ## 安装
 

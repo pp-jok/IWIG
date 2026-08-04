@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from public_html_provider import PublicCaptureError, cover_candidates, request_error
+from public_html_provider import PublicCaptureError, cover_candidates, image_candidates, request_error
 sys.path.insert(0, str(ROOT / "scripts"))
 from run_capture import render_public_report
 
@@ -28,6 +28,19 @@ class CoverCandidateTests(unittest.TestCase):
             [
                 {"url": "https://cdn.example/cover-default!nd_dft_wlteh_jpg_3", "source_path": "imageList.0.infoList.1.urlDefault"},
                 {"url": "https://cdn.example/cover!nd_prv_wlteh_jpg_3", "source_path": "imageList.0.infoList.0.url"},
+            ],
+        )
+
+    def test_image_candidates_preserve_page_order(self):
+        note = {"imageList": [
+            {"infoList": [{"url": "https://cdn.example/first-prv"}, {"url": "https://cdn.example/first-dft"}]},
+            {"infoList": [{"url": "https://cdn.example/second-dft"}]},
+        ]}
+        self.assertEqual(
+            image_candidates(note),
+            [
+                {"url": "https://cdn.example/first-dft", "source_path": "imageList.0.infoList.1.url", "index": 1},
+                {"url": "https://cdn.example/second-dft", "source_path": "imageList.1.infoList.0.url", "index": 2},
             ],
         )
 

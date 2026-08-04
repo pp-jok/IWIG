@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
+from content_package import file_record
 
 
 class PublicCaptureError(RuntimeError):
@@ -198,7 +199,7 @@ def _normalize(note: dict, source: dict) -> dict:
         name = item.get("name") if isinstance(item, dict) else item
         if isinstance(name, str) and name.strip() and name.strip() not in tags:
             tags.append(name.strip())
-    return {"schema_version": 1, "status": "partial", "source": source, "post": {"title": note.get("title"), "description": _first(note, "desc", "description"), "tags": tags, "type": _first(note, "type", "noteType", "note_type"), "published_at": _iso_time(_first(note, "time", "createTime", "create_time")), "author": {"id": _first(user, "userId", "user_id", "id"), "nickname": _first(user, "nickname", "nickName")}, "metrics": {"likes": _number(_first(interact, "likedCount", "liked_count")), "favorites": _number(_first(interact, "collectedCount", "collected_count")), "comments": _number(_first(interact, "commentCount", "comment_count")), "shares": _number(_first(interact, "shareCount", "share_count"))}}, "media": {"video": None, "cover": None}, "errors": [], "limitations": ["Comments are intentionally not collected by the public HTML provider."]}
+    return {"schema_version": 2, "status": "partial", "source": source, "post": {"title": note.get("title"), "description": _first(note, "desc", "description"), "tags": tags, "type": _first(note, "type", "noteType", "note_type"), "published_at": _iso_time(_first(note, "time", "createTime", "create_time")), "author": {"id": _first(user, "userId", "user_id", "id"), "nickname": _first(user, "nickname", "nickName")}, "metrics": {"likes": _number(_first(interact, "likedCount", "liked_count")), "favorites": _number(_first(interact, "collectedCount", "collected_count")), "comments": _number(_first(interact, "commentCount", "comment_count")), "shares": _number(_first(interact, "shareCount", "share_count"))}}, "media": {"video": None, "cover": None, "images": []}, "errors": [], "limitations": ["Comments are intentionally not collected by the public HTML provider."]}
 
 
 def cover_candidates(note: dict) -> list[dict]:
@@ -219,6 +220,28 @@ def cover_candidates(note: dict) -> list[dict]:
                     seen.add(url)
                     break
     return [candidate for _, candidate in sorted(candidates, key=lambda item: item[0])]
+
+
+def image_candidates(note: dict) -> list[dict]:
+    """Choose one directly exposed, best-quality URL for each page image."""
+    selected = []
+    for image_index, image in enumerate(note.get("imageList") or note.get("image_list") or []):
+        if not isinstance(image, dict):
+            continue
+        options = []
+        for info_index, info in enumerate(image.get("infoList") or info.get("info_list") or []):
+            if not isinstance(info, dict):
+                continue
+            for key in ("url", "urlDefault", "url_default"):
+                url = info.get(key)
+                if isinstance(url, str) and url.startswith(("http://", "https://")):
+                    quality = 0 if "dft" in url.lower() or str(info.get("imageScene", "")).upper() == "WB_DFT" else 1
+                    options.append((quality, info_index, key, url))
+                    break
+        if options:
+            _, info_index, key, url = min(options)
+            selected.append({"url": url, "source_path": f"imageList.{image_index}.infoList.{info_index}.{key}", "index": image_index + 1})
+    return selected
 
 
 def _video_candidates(note: dict) -> list[dict]:
@@ -290,28 +313,42 @@ def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0, max_v
         html = response.text
         if any(token in html for token in ("扫码登录", "验证码", "安全验证")):
             raise PublicCaptureError("login_or_verification_required")
-        (output_dir / "page.html").write_text(html, encoding="utf-8")
+        source_dir, media_dir = output_dir / "source", output_dir / "media"
+        source_dir.mkdir(exist_ok=True)
+        media_dir.mkdir(exist_ok=True)
+        (source_dir / "page.html").write_text(html, encoding="utf-8")
         state = _initial_state(html)
-        (output_dir / "initial_state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        (source_dir / "initial_state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         source = {"input_url": url, "resolved_url": str(response.url), "note_id": _note_id(str(response.url)), "provider": "public_html", "captured_at": datetime.now(timezone.utc).isoformat()}
         note = _current_note(state, source["note_id"])
         result = _normalize(note, source)
         videos = _video_candidates(note)
-        covers = cover_candidates(note)
-        (output_dir / "video_candidates.json").write_text(json.dumps(videos, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        (output_dir / "cover_candidates.json").write_text(json.dumps(covers, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        covers, images = cover_candidates(note), image_candidates(note)
+        (source_dir / "media_candidates.json").write_text(json.dumps({"video": videos, "cover": covers, "images": images}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         selected_video = _select_video(videos)
-        if not selected_video:
-            raise PublicCaptureError("video_candidate_not_found")
-        video_path = _stream_download(client, selected_video["url"], output_dir / "video.mp4", max_video_bytes, source["resolved_url"], "video")
-        result["media"]["video"] = {"candidate": selected_video, "path": video_path.name, "size_bytes": video_path.stat().st_size, "sha256": hashlib.sha256(video_path.read_bytes()).hexdigest()}
-        if covers:
+        if selected_video:
             try:
-                cover_path = _stream_download(client, covers[0]["url"], output_dir / "cover.jpg", 20 * 1024 * 1024, source["resolved_url"], "image")
-                result["media"]["cover"] = {"candidate": covers[0], "path": cover_path.name, "size_bytes": cover_path.stat().st_size}
+                video_path = _stream_download(client, selected_video["url"], media_dir / "video.mp4", max_video_bytes, source["resolved_url"], "video")
+                result["media"]["video"] = {"candidate": selected_video, **file_record(video_path)}
             except PublicCaptureError as error:
                 result["limitations"].append(str(error))
-        else:
-            result["limitations"].append("No direct cover URL was exposed by the public note data.")
+        if covers:
+            try:
+                cover_path = _stream_download(client, covers[0]["url"], media_dir / "cover.jpg", 20 * 1024 * 1024, source["resolved_url"], "image")
+                result["media"]["cover"] = {"candidate": covers[0], **file_record(cover_path)}
+            except PublicCaptureError as error:
+                result["limitations"].append(str(error))
+        for image in images:
+            try:
+                images_dir = media_dir / "images"
+                images_dir.mkdir(exist_ok=True)
+                image_path = _stream_download(client, image["url"], images_dir / f"{image['index']:03}.jpg", 20 * 1024 * 1024, source["resolved_url"], "image")
+                result["media"]["images"].append({"candidate": image, **file_record(image_path)})
+            except PublicCaptureError as error:
+                result["limitations"].append(f"image_{image['index']}: {error}")
+        if not result["media"]["cover"] and result["media"]["images"]:
+            result["media"]["cover"] = result["media"]["images"][0]
+        if not result["media"]["video"] and not result["media"]["images"]:
+            raise PublicCaptureError("public_media_not_available")
         result["status"] = "completed"
         return result

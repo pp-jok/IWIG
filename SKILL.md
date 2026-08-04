@@ -1,6 +1,6 @@
 ---
 name: xhs-url-video-capture
-description: Use when a user provides one Xiaohongshu/XHS note URL and wants its public post data, direct video, directly exposed cover, and local transcript in one Markdown report without browser automation.
+description: Use when a user provides one Xiaohongshu/XHS note URL and wants a public-HTML-only structured content package for a video or image note.
 ---
 
 # XHS Public HTML Video Capture
@@ -25,7 +25,7 @@ This creates `~/.xhs-url-video-capture/.venv` and installs `httpx` plus `faster-
   --max-video-mb 300
 ```
 
-The command writes one `post_and_transcript.md`, `capture.json`, `page.html`, `initial_state.json`, video candidates, cover candidates, `video.mp4`, and an optional `cover.webp` / `cover.jpg` / `cover.png`.
+The command writes `content_package.json`, `report.md`, source HTML/state, and directly exposed video, cover, or ordered images. Video transcription additionally creates local text, timestamp segments, and SRT subtitles when available.
 
 ## Boundaries
 
