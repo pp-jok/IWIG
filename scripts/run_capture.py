@@ -32,7 +32,7 @@ def render_public_report(result: dict) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", required=True)
+    parser.add_argument("--url")
     parser.add_argument("--output-dir", default="output")
     parser.add_argument("--run-dir", help="Reuse this existing capture directory instead of creating a timestamped one")
     parser.add_argument("--timeout", type=float, default=20.0)
@@ -40,7 +40,25 @@ def main() -> int:
     parser.add_argument("--force", action="store_true", help="Capture again even if the direct note ID already exists")
     parser.add_argument("--keyframes", action="store_true", help="Extract local representative video frames")
     parser.add_argument("--ocr", action="store_true", help="Run local macOS Vision OCR on cover and keyframes")
+    parser.add_argument("--enrich-dir", help="Add local derived artifacts to an existing content package without requesting XHS")
     args = parser.parse_args()
+    if args.enrich_dir:
+        output = Path(args.enrich_dir).expanduser().resolve()
+        manifest = output / "content_package.json"
+        result = json.loads(manifest.read_text(encoding="utf-8"))
+        video_info = result["media"].get("video")
+        if video_info and args.keyframes:
+            result["keyframes"] = extract_keyframes(output / "media" / video_info["path"], output / "derived" / "keyframes")
+        if args.ocr and result["media"].get("cover"):
+            result["ocr"] = {"cover": ocr_macos(output / "media" / result["media"]["cover"]["path"]), "images": [], "keyframes": []}
+            for frame in (result.get("keyframes") or {}).get("frames") or []:
+                result["ocr"]["keyframes"].append({"path": frame["path"], "time_seconds": frame["time_seconds"], **ocr_macos(output / "derived" / "keyframes" / frame["path"])})
+        manifest.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        (output / "report.md").write_text(render_public_report(result), encoding="utf-8")
+        print(output / "report.md")
+        return 0
+    if not args.url:
+        parser.error("--url is required unless --enrich-dir is used")
     output_root = Path(args.output_dir).expanduser().resolve()
     existing = None if args.run_dir else find_existing_package(output_root, note_id_from_url(args.url))
     if should_reuse(existing, args.force):
