@@ -1,5 +1,6 @@
 .venv/
 .runtime/
+.worktrees/
 output/
 __pycache__/
 *.mp4
