@@ -278,26 +278,32 @@ def _stream_download(client, url: str, destination: Path, max_bytes: int, refere
     _validate_url(url)
     part = destination.with_suffix(destination.suffix + ".part")
     headers = {"User-Agent": USER_AGENT, "Referer": referer}
-    with client.stream("GET", url, headers=headers, follow_redirects=True) as response:
-        if response.status_code != 200:
+    try:
+        with client.stream("GET", url, headers=headers, follow_redirects=True) as response:
+            if response.status_code != 200:
+                raise PublicCaptureError(f"{expected}_download_failed")
+            content_type = response.headers.get("content-type", "").lower()
+            if not content_type.startswith(expected + "/"):
+                raise PublicCaptureError(f"{expected}_download_failed")
+            final_path = destination.with_suffix(_extension(content_type, destination.suffix))
+            written = 0
+            with part.open("wb") as target:
+                for chunk in response.iter_bytes():
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise PublicCaptureError(f"{expected}_download_failed")
+                    target.write(chunk)
+        if written == 0:
             raise PublicCaptureError(f"{expected}_download_failed")
-        content_type = response.headers.get("content-type", "").lower()
-        if not content_type.startswith(expected + "/"):
-            raise PublicCaptureError(f"{expected}_download_failed")
-        final_path = destination.with_suffix(_extension(content_type, destination.suffix))
-        written = 0
-        with part.open("wb") as target:
-            for chunk in response.iter_bytes():
-                written += len(chunk)
-                if written > max_bytes:
-                    raise PublicCaptureError(f"{expected}_download_failed")
-                target.write(chunk)
-    if written == 0:
-        raise PublicCaptureError(f"{expected}_download_failed")
-    if expected == "video" and b"ftyp" not in part.read_bytes()[:32]:
-        raise PublicCaptureError("video_validation_failed")
-    part.replace(final_path)
-    return final_path
+        if expected == "video":
+            with part.open("rb") as source:
+                if b"ftyp" not in source.read(32):
+                    raise PublicCaptureError("video_validation_failed")
+        part.replace(final_path)
+        return final_path
+    except Exception:
+        part.unlink(missing_ok=True)
+        raise
 
 
 def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0, max_video_bytes: int = 300 * 1024 * 1024) -> dict:
