@@ -28,6 +28,7 @@ This creates `~/.xhs-url-video-capture/.venv` and installs `httpx` plus `faster-
 The command writes `content_package.json`, `report.md`, source HTML/state, and directly exposed video, cover, or ordered images. Video transcription additionally creates local text, timestamp segments, and SRT subtitles when available.
 
 For a direct note URL, an existing package with the same note ID under the output directory is reused rather than downloaded again. Use `--run-dir` to explicitly continue working in a chosen directory.
+Pass `--force` to deliberately capture a fresh snapshot.
 
 ## Boundaries
 

@@ -26,6 +26,10 @@ def find_existing_package(output_dir: Path, note_id: str | None) -> Path | None:
     return None
 
 
+def should_reuse(existing: Path | None, force: bool) -> bool:
+    return existing is not None and not force
+
+
 def file_record(path: Path) -> dict:
     digest = hashlib.sha256()
     with path.open("rb") as source:

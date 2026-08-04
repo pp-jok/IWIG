@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from public_html_provider import PublicCaptureError, capture_public_note, note_id_from_url
-from content_package import field_status, find_existing_package, srt
+from content_package import field_status, find_existing_package, should_reuse, srt
 
 
 def transcribe(video: Path) -> list[dict]:
@@ -37,10 +37,11 @@ def main() -> int:
     parser.add_argument("--run-dir", help="Reuse this existing capture directory instead of creating a timestamped one")
     parser.add_argument("--timeout", type=float, default=20.0)
     parser.add_argument("--max-video-mb", type=int, default=300)
+    parser.add_argument("--force", action="store_true", help="Capture again even if the direct note ID already exists")
     args = parser.parse_args()
     output_root = Path(args.output_dir).expanduser().resolve()
     existing = None if args.run_dir else find_existing_package(output_root, note_id_from_url(args.url))
-    if existing:
+    if should_reuse(existing, args.force):
         print(existing / "report.md")
         return 0
     output = Path(args.run_dir).expanduser().resolve() if args.run_dir else output_root / __import__("datetime").datetime.now().strftime("%Y%m%d-%H%M%S")

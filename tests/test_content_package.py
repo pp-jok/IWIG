@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from content_package import field_status, file_record, find_existing_package, image_metadata, srt, video_metadata
+from content_package import field_status, file_record, find_existing_package, image_metadata, should_reuse, srt, video_metadata
 
 
 class ContentPackageTests(unittest.TestCase):
@@ -40,6 +40,10 @@ class ContentPackageTests(unittest.TestCase):
             run = Path(temporary) / "20260804-010101"; run.mkdir()
             (run / "content_package.json").write_text('{"source":{"note_id":"abc"}}', encoding="utf-8")
             self.assertEqual(find_existing_package(Path(temporary), "abc"), run)
+
+    def test_force_disables_package_reuse(self):
+        self.assertTrue(should_reuse(Path("run"), force=False))
+        self.assertFalse(should_reuse(Path("run"), force=True))
 
 
 if __name__ == "__main__":
