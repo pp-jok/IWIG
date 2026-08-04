@@ -5,6 +5,7 @@ import hashlib
 import ipaddress
 import json
 import re
+import socket
 from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
@@ -43,6 +44,13 @@ def _validate_url(url: str, public_xhs_only: bool = False) -> None:
         address = None
     if address and (address.is_loopback or address.is_private or address.is_link_local or address.is_reserved):
         raise PublicCaptureError("invalid_url")
+    if address is None:
+        try:
+            resolved = {ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)}
+        except OSError as error:
+            raise PublicCaptureError("invalid_url") from error
+        if not resolved or any(item.is_loopback or item.is_private or item.is_link_local or item.is_reserved for item in resolved):
+            raise PublicCaptureError("invalid_url")
     if public_xhs_only and host not in PUBLIC_HOSTS:
         raise PublicCaptureError("invalid_url")
 
