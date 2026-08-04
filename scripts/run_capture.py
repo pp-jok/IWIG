@@ -71,9 +71,14 @@ def main() -> int:
     output = Path(args.run_dir).expanduser().resolve() if args.run_dir else output_root / __import__("datetime").datetime.now().strftime("%Y%m%d-%H%M%S")
     output.mkdir(parents=True, exist_ok=True)
     report = output / "report.md"
-    if report.is_file():
-        print(report)
-        return 0
+    manifest = output / "content_package.json"
+    if report.is_file() and manifest.is_file():
+        try:
+            if json.loads(manifest.read_text(encoding="utf-8")).get("status") == "completed":
+                print(report)
+                return 0
+        except (OSError, json.JSONDecodeError):
+            pass
     try:
         result = capture_public_note(args.url, output, args.timeout, args.max_video_mb * 1024 * 1024)
         video_info = result["media"].get("video")
