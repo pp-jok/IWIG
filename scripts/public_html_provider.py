@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
-from content_package import file_record, image_metadata
+from content_package import file_record, image_metadata, video_metadata
 
 
 class PublicCaptureError(RuntimeError):
@@ -329,7 +329,7 @@ def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0, max_v
         if selected_video:
             try:
                 video_path = _stream_download(client, selected_video["url"], media_dir / "video.mp4", max_video_bytes, source["resolved_url"], "video")
-                result["media"]["video"] = {"candidate": selected_video, **file_record(video_path)}
+                result["media"]["video"] = {"candidate": selected_video, **file_record(video_path), "metadata": video_metadata(video_path)}
             except PublicCaptureError as error:
                 result["limitations"].append(str(error))
         if covers:

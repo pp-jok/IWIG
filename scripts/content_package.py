@@ -28,6 +28,19 @@ def image_metadata(path: Path) -> dict:
     return {"format": path.suffix.lstrip(".").lower() or "unknown", "width": None, "height": None}
 
 
+def video_metadata(path: Path) -> dict:
+    try:
+        import av
+        with av.open(str(path)) as container:
+            stream = next((item for item in container.streams if item.type == "video"), None)
+            if stream is None:
+                return {"status": "not_exposed"}
+            duration = float(stream.duration * stream.time_base) if stream.duration is not None else None
+            return {"status": "available", "duration_seconds": duration, "width": stream.width, "height": stream.height, "codec": stream.codec_context.name, "container": container.format.name}
+    except Exception as error:
+        return {"status": "failed", "reason": type(error).__name__}
+
+
 def _timestamp(seconds: float) -> str:
     milliseconds = round(seconds * 1000)
     hours, milliseconds = divmod(milliseconds, 3_600_000)
