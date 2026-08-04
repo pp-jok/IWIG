@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from public_html_provider import PublicCaptureError, capture_public_note, note_id_from_url
-from content_package import extract_keyframes, field_status, find_existing_package, ocr_macos, should_reuse, srt
+from content_package import extract_keyframes, field_status, find_existing_package, ocr_macos, select_structural_keyframes, should_reuse, srt
 
 
 def transcribe(video: Path) -> list[dict]:
@@ -53,6 +53,9 @@ def main() -> int:
             result["ocr"] = {"cover": ocr_macos(output / "media" / result["media"]["cover"]["path"]), "images": [], "keyframes": []}
             for frame in (result.get("keyframes") or {}).get("frames") or []:
                 result["ocr"]["keyframes"].append({"path": frame["path"], "time_seconds": frame["time_seconds"], **ocr_macos(output / "derived" / "keyframes" / frame["path"])})
+            if result.get("keyframes"):
+                duration = result["media"].get("video", {}).get("metadata", {}).get("duration_seconds") or 1
+                result["keyframes"]["selected"] = select_structural_keyframes(result["ocr"]["keyframes"], duration)
         manifest.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         (output / "report.md").write_text(render_public_report(result), encoding="utf-8")
         print(output / "report.md")

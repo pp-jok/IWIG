@@ -7,7 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from content_package import extract_keyframes, field_status, file_record, find_existing_package, image_metadata, should_reuse, srt, video_metadata
+from content_package import extract_keyframes, field_status, file_record, find_existing_package, image_metadata, select_structural_keyframes, should_reuse, srt, video_metadata
 
 
 class ContentPackageTests(unittest.TestCase):
@@ -60,6 +60,12 @@ class ContentPackageTests(unittest.TestCase):
     def test_keyframe_extraction_reports_missing_video(self):
         with tempfile.TemporaryDirectory() as temporary:
             self.assertEqual(extract_keyframes(Path("missing.mp4"), Path(temporary))["status"], "failed")
+
+    def test_structural_selection_prefers_hook_and_text_rich_change(self):
+        frames = [{"path": "001.jpg", "time_seconds": 2, "ocr_text": "开头承诺"}, {"path": "002.jpg", "time_seconds": 30, "ocr_text": ""}, {"path": "003.jpg", "time_seconds": 60, "ocr_text": "第一步 方法 清单"}]
+        selected = select_structural_keyframes(frames, duration_seconds=90, limit=2)
+        self.assertEqual([item["path"] for item in selected], ["001.jpg", "003.jpg"])
+        self.assertIn("reason", selected[0])
 
 
 if __name__ == "__main__":

@@ -93,6 +93,21 @@ def extract_keyframes(path: Path, destination: Path, interval_seconds: int = 30,
         return {"status": "failed", "reason": type(error).__name__, "frames": []}
 
 
+def select_structural_keyframes(frames: list[dict], duration_seconds: float, limit: int = 8) -> list[dict]:
+    ranked = []
+    for frame in frames:
+        position = frame.get("time_seconds", 0) / max(duration_seconds, 1)
+        text = frame.get("ocr_text", "")
+        score = min(len(text), 80) / 20
+        reason = "文字信息"
+        if position <= 0.08:
+            score += 4; reason = "开头钩子"
+        elif position >= 0.9:
+            score += 2; reason = "结尾总结"
+        ranked.append({**frame, "score": round(score, 2), "reason": reason})
+    return sorted(ranked, key=lambda item: (-item["score"], item["time_seconds"]))[:limit]
+
+
 def ocr_macos(image: Path) -> dict:
     script = Path(__file__).with_name("ocr_macos.swift")
     try:
