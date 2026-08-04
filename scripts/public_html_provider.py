@@ -328,7 +328,8 @@ def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0, max_v
         note = _current_note(state, source["note_id"])
         result = _normalize(note, source)
         videos = _video_candidates(note)
-        covers, images = cover_candidates(note), image_candidates(note)
+        covers = cover_candidates(note)
+        images = image_candidates(note) if str(_first(note, "type", "noteType", "note_type") or "").lower() not in {"video", "video_note"} else []
         (source_dir / "media_candidates.json").write_text(json.dumps({"video": videos, "cover": covers, "images": images}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         selected_video = _select_video(videos)
         if selected_video:
