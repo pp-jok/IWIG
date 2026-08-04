@@ -25,6 +25,8 @@ This creates `~/.xhs-url-video-capture/.venv` and installs `httpx` plus `faster-
   --max-video-mb 300
 ```
 
+Add `--keyframes --ocr` to extract up to 12 local representative frames and run macOS Vision OCR on the cover, image pages, and frames. OCR is optional and never uploads media.
+
 The command writes `content_package.json`, `report.md`, source HTML/state, and directly exposed video, cover, or ordered images. Video transcription additionally creates local text, timestamp segments, and SRT subtitles when available.
 
 For a direct note URL, an existing package with the same note ID under the output directory is reused rather than downloaded again. Use `--run-dir` to explicitly continue working in a chosen directory.
@@ -37,3 +39,4 @@ Pass `--force` to deliberately capture a fresh snapshot.
 - Do not collect comments or replies. The report must state that comments were intentionally not collected.
 - Use only complete direct video and cover URLs exposed in the selected current-note object. Never invent a URL from a file ID, refresh a token, create a signature, or retry through a private endpoint.
 - Keep local ASR only for successfully downloaded media. Do not use online transcription services.
+- OCR requires macOS Vision and may take longer on its first run while Swift compiles the local helper.
