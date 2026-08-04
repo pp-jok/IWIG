@@ -26,7 +26,7 @@ def render_public_report(result: dict) -> str:
     lines = ["# 小红书公开帖子与本地口播", "", "## 帖子信息", "", f"- 链接：{source.get('resolved_url') or '未获取'}", f"- 帖子 ID：{source.get('note_id') or '未获取'}", f"- 标题：{post.get('title') or '未获取'}", f"- 作者：{post['author'].get('nickname') or '未获取'}", f"- 点赞：{metrics.get('likes') or '未获取'}", f"- 收藏：{metrics.get('favorites') or '未获取'}", f"- 评论数：{metrics.get('comments') or '未获取'}", f"- 标签：{' '.join(post.get('tags') or []) or '未获取'}", "", "## 正文", "", post.get("description") or "未获取", "", "## 媒体", "", f"- 视频：{media.get('video', {}).get('path') if media.get('video') else '未获取'}", f"- 封面：{media.get('cover', {}).get('path') if media.get('cover') else '未获取'}", "", "## 评论", "", "- 本 Skill 只读取公开 HTML，不采集评论详情或二级回复。", "", "## 本地口播逐字稿", ""]
     transcript = result.get("transcript") or []
     lines += ["> 来源：faster-whisper small，本地 CPU int8 自动转写；可能存在听辨或断句错误。", "", *[f"{item['start']:.2f}—{item['end']:.2f}  {item['text']}" for item in transcript]] if transcript else ["[未生成：视频不可用或本地转写失败。]"]
-    lines += ["", "## 限制", "", *[f"- {item}" for item in result.get("limitations") or []], ""]
+    lines += ["", "## 获取完整度", "", *[f"- {key}：{value}" for key, value in (result.get("completeness") or {}).items()], "", "## 限制", "", *[f"- {item}" for item in result.get("limitations") or []], ""]
     return "\n".join(lines)
 
 

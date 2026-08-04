@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
-from content_package import file_record
+from content_package import file_record, image_metadata
 
 
 class PublicCaptureError(RuntimeError):
@@ -335,7 +335,7 @@ def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0, max_v
         if covers:
             try:
                 cover_path = _stream_download(client, covers[0]["url"], media_dir / "cover.jpg", 20 * 1024 * 1024, source["resolved_url"], "image")
-                result["media"]["cover"] = {"candidate": covers[0], **file_record(cover_path)}
+                result["media"]["cover"] = {"candidate": covers[0], **file_record(cover_path), **image_metadata(cover_path)}
             except PublicCaptureError as error:
                 result["limitations"].append(str(error))
         for image in images:
@@ -343,7 +343,7 @@ def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0, max_v
                 images_dir = media_dir / "images"
                 images_dir.mkdir(exist_ok=True)
                 image_path = _stream_download(client, image["url"], images_dir / f"{image['index']:03}.jpg", 20 * 1024 * 1024, source["resolved_url"], "image")
-                result["media"]["images"].append({"candidate": image, **file_record(image_path)})
+                result["media"]["images"].append({"candidate": image, **file_record(image_path), **image_metadata(image_path)})
             except PublicCaptureError as error:
                 result["limitations"].append(f"image_{image['index']}: {error}")
         if not result["media"]["cover"] and result["media"]["images"]:

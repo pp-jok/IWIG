@@ -51,10 +51,13 @@ class PublicReportTests(unittest.TestCase):
             "source": {"resolved_url": "https://www.xiaohongshu.com/explore/note", "note_id": "note"},
             "post": {"title": "标题", "description": "正文", "tags": [], "author": {"nickname": "作者"}, "metrics": {"likes": None, "favorites": None, "comments": 3, "shares": None}},
             "media": {"video": {"path": "video.mp4"}, "cover": {"path": "cover.webp"}},
+            "completeness": {"title": "available", "comments": "intentionally_not_collected"},
             "limitations": ["Comments are intentionally not collected by the public HTML provider."],
         })
         self.assertIn("cover.webp", report)
         self.assertIn("不采集评论详情", report)
+        self.assertIn("获取完整度", report)
+        self.assertIn("comments：intentionally_not_collected", report)
 
 
 class BrowserRemovalTests(unittest.TestCase):
