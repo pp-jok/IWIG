@@ -101,7 +101,7 @@ def main() -> int:
         print(report)
         return 0
     except PublicCaptureError as error:
-        failed = {"source": {"input_url": args.url}, "post": {"title": None, "description": None, "tags": [], "author": {"nickname": None}, "metrics": {}}, "media": {"video": None, "cover": None}, "limitations": [str(error)]}
+        failed = {"schema_version": 2, "status": "failed", "source": {"input_url": args.url, "resolved_url": None, "note_id": None, "provider": "public_html"}, "post": {"title": None, "description": None, "tags": [], "author": {"id": None, "nickname": None}, "metrics": {"likes": None, "favorites": None, "comments": None, "shares": None}}, "media": {"video": None, "cover": None, "images": []}, "errors": [{"stage": "capture", "code": str(error)}], "limitations": [str(error)], "completeness": {"title": "not_exposed", "description": "not_exposed", "video": "not_exposed", "images": "not_exposed", "comments": "intentionally_not_collected", "transcript": "not_run"}}
         (output / "content_package.json").write_text(json.dumps(failed, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         report.write_text(render_public_report(failed), encoding="utf-8")
         print(report)
