@@ -69,6 +69,11 @@ class BrowserRemovalTests(unittest.TestCase):
                 self.assertNotIn("cdp", text)
         self.assertFalse((ROOT / "scripts" / "start_chrome.sh").exists())
 
+    def test_docs_describe_public_content_package(self):
+        text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("content_package.json", text)
+        self.assertIn("Do not use a browser", text)
+
 
 class TransportErrorTests(unittest.TestCase):
     def test_maps_transport_errors_to_a_reportable_public_error(self):
