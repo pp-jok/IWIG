@@ -58,8 +58,11 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
 
 def process_transcript(result: dict, run: Path) -> None:
     video = _path(run, result["media"].get("video"))
-    if not video or not video.is_file() or result.get("transcript"):
-        if not video or not video.is_file(): _stage(result, "transcribe", "not_run", warnings=["video unavailable"])
+    previous = result.get("processing", {}).get("transcribe", {})
+    outputs = previous.get("output_paths", [])
+    if previous.get("status") == "completed" and outputs and all((run / item).is_file() for item in outputs):
+        return
+    if not video or not video.is_file():
         return
     try:
         normalized, metadata = transcribe(video)
