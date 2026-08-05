@@ -1,9 +1,9 @@
 ---
-name: xhs-url-video-capture
-description: Use when a user provides one Xiaohongshu/XHS note URL and wants a public-HTML-only structured content package for a video or image note.
+name: IWIG
+description: Convert one public Xiaohongshu note URL into a traceable local multimodal content package and analysis index without browser automation, cookies, login, private APIs, or hosted AI services.
 ---
 
-# XHS Public HTML Video Capture
+# IWIG
 
 Capture one public Xiaohongshu note at a time through ordinary HTTPS. Do not use a browser, cookies, login, JavaScript execution, signatures, private APIs, proxies, or anti-detection measures.
 
@@ -14,14 +14,14 @@ cd <SKILL_DIRECTORY>
 python3 scripts/setup.py
 ```
 
-This creates `~/.xhs-url-video-capture/.venv` and installs `httpx` plus `faster-whisper`. No OpenAI API key is required.
+This creates `~/.iwig/.venv` and installs local dependencies. No OpenAI API key is required.
 
 ## Capture one URL
 
 ```bash
-~/.xhs-url-video-capture/.venv/bin/python scripts/run_capture.py \
+~/.iwig/.venv/bin/python scripts/iwig.py capture \
   --url '<XHS_NOTE_URL>' \
-  --output-dir ~/.xhs-url-video-capture/output \
+  --output-dir ~/.iwig/output \
   --max-video-mb 300
 ```
 

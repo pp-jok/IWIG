@@ -58,7 +58,9 @@ class ContentPackageTests(unittest.TestCase):
     def test_finds_existing_package_by_note_id(self):
         with tempfile.TemporaryDirectory() as temporary:
             run = Path(temporary) / "20260804-010101"; run.mkdir()
-            (run / "content_package.json").write_text('{"source":{"note_id":"abc"}}', encoding="utf-8")
+            package = new_content_package("completed", "https://example.test/abc")
+            package["source"]["note_id"] = "abc"
+            (run / "content_package.json").write_text(__import__("json").dumps(package), encoding="utf-8")
             self.assertEqual(find_existing_package(Path(temporary), "abc"), run)
 
     def test_force_disables_package_reuse(self):
@@ -70,14 +72,14 @@ class ContentPackageTests(unittest.TestCase):
             self.assertEqual(extract_keyframes(Path("missing.mp4"), Path(temporary))["status"], "failed")
 
     def test_structural_selection_prefers_hook_and_text_rich_change(self):
-        frames = [{"path": "001.jpg", "time_seconds": 2, "ocr_text": "开头承诺"}, {"path": "002.jpg", "time_seconds": 30, "ocr_text": ""}, {"path": "003.jpg", "time_seconds": 60, "ocr_text": "第一步 方法 清单"}]
+        frames = [{"id": "frame-001", "path": "001.jpg", "time_seconds": 2, "ocr": {"text": "开头承诺"}}, {"id": "frame-002", "path": "002.jpg", "time_seconds": 30, "ocr": {"text": ""}}, {"id": "frame-003", "path": "003.jpg", "time_seconds": 60, "ocr": {"text": "第一步 方法 清单"}}]
         selected = select_structural_keyframes(frames, duration_seconds=90, limit=2)
         self.assertEqual([item["path"] for item in selected], ["001.jpg", "003.jpg"])
-        self.assertIn("reason", selected[0])
+        self.assertIn("reasons", selected[0])
 
     def test_timeline_attaches_frame_to_overlapping_speech(self):
-        timeline = build_timeline([{"start": 0, "end": 5, "text": "开头"}], [{"path": "001.jpg", "time_seconds": 2, "text": "标题"}])
-        self.assertEqual(timeline["events"][0]["frames"][0]["path"], "001.jpg")
+        timeline = build_timeline([{"start": 0, "end": 5, "text": "开头"}], [{"id": "frame-001", "path": "001.jpg", "time_seconds": 2, "ocr": {"text": "标题"}}])
+        self.assertEqual({item["type"] for item in timeline["events"]}, {"speech", "frame", "ocr"})
 
     def test_scene_boundaries_report_visual_change(self):
         frames = [{"path": "001.jpg", "perceptual_hash": "0000000000000000"}, {"path": "002.jpg", "perceptual_hash": "ffffffffffffffff"}]

@@ -6,6 +6,7 @@ import json
 import subprocess
 import sys
 import platform
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -40,25 +41,62 @@ def runtime_metadata() -> dict:
             versions[name] = getattr(module, "__version__", "installed")
         except Exception:
             versions[name] = None
-    return {"generator": {"name": "xhs-url-video-capture", "version": "1.0.0", "python": sys.version.split()[0], "dependencies": versions}}
+    return {"generator": {"name": "IWIG", "version": "0.3.0-alpha", "python": sys.version.split()[0], "dependencies": versions}, "provider": {"name": "xiaohongshu-public-html", "version": "1"}}
 
 
 def new_content_package(status: str, input_url: str | None) -> dict:
     if status not in {"completed", "partial", "failed"}:
         raise ValueError("invalid package status")
     now = datetime.now(timezone.utc).isoformat()
-    return {"schema_version": 2, "status": status,
+    return {"schema": {"name": "iwig-content-package", "version": "2.0.0"}, "schema_version": 2, "status": status,
+            "identity": {"platform": "xiaohongshu", "note_id": None, "author_id": None, "package_id": None, "snapshot_id": None, "snapshot_at": now, "content_fingerprint": None, "primary_media_sha256": None},
             "source": {"input_url": input_url, "resolved_url": None, "canonical_url": None,
                        "note_id": None, "provider": "public_html", "captured_at": now},
             "post": {"title": None, "description": None, "tags": [], "type": None, "published_at": None,
                      "author": {"id": None, "nickname": None},
                      "metrics": {"likes": None, "favorites": None, "comments": None, "shares": None}},
-            "media": {"video": None, "cover": None, "images": []}, "field_provenance": {},
-            "errors": [], "limitations": [], "completeness": {}, "runtime": runtime_metadata()}
+            "media": {"video": None, "cover": None, "images": []}, "derived": {"keyframes": [], "selected_keyframes": [], "scenes": [], "transcript": None, "ocr": {"cover": None, "images": [], "keyframes": []}, "timeline": None}, "field_provenance": {},
+            "processing": {}, "errors": [], "limitations": [], "completeness": {}, "runtime": runtime_metadata()}
+
+
+def atomic_write_json(path: Path, value: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as target:
+        json.dump(value, target, ensure_ascii=False, indent=2)
+        target.write("\n")
+        temporary = Path(target.name)
+    temporary.replace(path)
+
+
+def _schema(name: str) -> dict:
+    path = Path(__file__).resolve().parents[1] / "schemas" / name
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _path_issues(value, path="") -> list[str]:
+    issues = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            child_path = f"{path}.{key}" if path else key
+            if key == "path" and isinstance(child, str) and (Path(child).is_absolute() or ".." in Path(child).parts):
+                issues.append(f"invalid_relative_path:{child_path}")
+            issues.extend(_path_issues(child, child_path))
+    elif isinstance(value, list):
+        for index, child in enumerate(value): issues.extend(_path_issues(child, f"{path}.{index}"))
+    return issues
+
+
+def validate_content_package_schema(package: dict) -> list[str]:
+    try:
+        from jsonschema import Draft202012Validator
+        issues = [f"schema:{item.json_path}:{item.message}" for item in Draft202012Validator(_schema("iwig-content-package-v2.schema.json")).iter_errors(package)]
+    except ImportError:
+        issues = ["schema:jsonschema_not_installed"]
+    return issues + _path_issues(package)
 
 
 def validate_content_package(package: dict) -> list[str]:
-    required = ("schema_version", "status", "source", "post", "media", "errors", "limitations", "completeness", "runtime")
+    required = ("schema", "schema_version", "status", "identity", "source", "post", "media", "derived", "field_provenance", "processing", "errors", "limitations", "completeness", "runtime")
     errors = [f"missing:{name}" for name in required if name not in package]
     if package.get("status") not in {"completed", "partial", "failed"}:
         errors.append("invalid:status")
@@ -67,28 +105,37 @@ def validate_content_package(package: dict) -> list[str]:
             errors.append(f"invalid:completeness.{key}")
     if not isinstance(package.get("media"), dict):
         errors.append("invalid:media")
-    return errors
+    return errors + validate_content_package_schema(package)
 
 
-def build_timeline(transcript: list[dict], frames: list[dict]) -> dict:
-    events = []
+def build_timeline(transcript: list[dict], frames: list[dict], scenes: list[dict] | None = None, duration_seconds: float | None = None) -> dict:
+    events, relations = [], []
     for index, segment in enumerate(transcript, 1):
-        attached = [frame for frame in frames if segment["start"] <= frame.get("time_seconds", -1) <= segment["end"]]
-        scenes = [frame.get("scene") for frame in attached if frame.get("scene")]
-        events.append({"segment_id": f"seg-{index:03}", "start": segment["start"], "end": segment["end"], "speech": segment.get("text", ""), "frames": attached, "ocr": [frame.get("text", "") for frame in attached if frame.get("text")], "scenes": scenes})
-    return {"events": events}
+        speech_id = f"speech-{index:03}"
+        events.append({"id": speech_id, "type": "speech", "start": segment["start"], "end": segment["end"], "text": segment.get("text", "")})
+    for frame in frames:
+        frame_id, at = frame.get("id"), frame.get("time_seconds", 0)
+        events.append({"id": frame_id, "type": "frame", "at": at, "frame_ref": frame_id})
+        text = (frame.get("ocr") or {}).get("text", "")
+        if text: events.append({"id": f"ocr-{frame_id}", "type": "ocr", "at": at, "frame_ref": frame_id, "text": text})
+        for speech in [event for event in events if event["type"] == "speech" and event["start"] <= at <= event["end"]]: relations.append({"from": frame_id, "to": speech["id"], "type": "overlaps"})
+    for scene in scenes or []: events.append({"id": scene["id"], "type": "scene", "start": scene["start_seconds"], "end": scene["end_seconds"]})
+    return {"schema": {"name": "iwig-timeline", "version": "1.0.0"}, "duration_seconds": duration_seconds, "events": events, "relations": relations}
 
 
 def find_existing_package(output_dir: Path, note_id: str | None) -> Path | None:
     if not note_id or not output_dir.is_dir():
         return None
+    candidates = []
     for manifest in output_dir.glob("*/content_package.json"):
         try:
-            if json.loads(manifest.read_text(encoding="utf-8")).get("source", {}).get("note_id") == note_id:
-                return manifest.parent
+            package = json.loads(manifest.read_text(encoding="utf-8"))
+            if package.get("source", {}).get("note_id") == note_id and package.get("status") == "completed" and not package.get("stale") and not validate_content_package(package):
+                media = package.get("media", {}); records = [item for item in [media.get("video"), media.get("cover")] if item] + media.get("images", [])
+                if all((manifest.parent / record["path"]).is_file() and file_record(manifest.parent / record["path"], manifest.parent)["sha256"] == record.get("sha256") for record in records): candidates.append((package["source"].get("captured_at") or "", manifest.parent))
         except (OSError, json.JSONDecodeError):
             continue
-    return None
+    return max(candidates, default=("", None))[1]
 
 
 def should_reuse(existing: Path | None, force: bool) -> bool:
@@ -151,12 +198,19 @@ def scene_boundaries(frames: list[dict], threshold: float = 0.72) -> list[dict]:
         similarity = hash_similarity(previous.get("perceptual_hash") if previous else None, frame.get("perceptual_hash"))
         frame["adjacent_similarity"] = similarity
         if previous and similarity is not None and similarity < threshold:
-            scenes.append({"start_index": start, "end_index": index - 1, "representative": frames[start].get("path"), "boundary_similarity": similarity})
+            scenes.append(_scene(frames, start, index - 1, similarity, len(scenes) + 1))
             start = index
         previous = frame
     if frames:
-        scenes.append({"start_index": start, "end_index": len(frames) - 1, "representative": frames[start].get("path"), "boundary_similarity": frames[start].get("adjacent_similarity")})
+        scenes.append(_scene(frames, start, len(frames) - 1, frames[start].get("adjacent_similarity"), len(scenes) + 1))
     return scenes
+
+
+def _scene(frames: list[dict], start: int, end: int, similarity: float | None, number: int) -> dict:
+    scene_id = f"scene-{number:03}"
+    members = frames[start:end + 1]
+    for frame in members: frame["scene_id"] = scene_id
+    return {"id": scene_id, "start_seconds": members[0].get("time_seconds", 0), "end_seconds": members[-1].get("time_seconds", 0), "frame_ids": [item.get("id") for item in members], "representative_frame_id": members[0].get("id"), "boundary_similarity": similarity}
 
 
 def video_metadata(path: Path) -> dict:
@@ -199,18 +253,18 @@ def select_structural_keyframes(frames: list[dict], duration_seconds: float, lim
     previous_text = ""
     for frame in frames:
         position = frame.get("time_seconds", 0) / max(duration_seconds, 1)
-        text = frame.get("ocr_text", "")
+        text = (frame.get("ocr") or {}).get("text", "")
         words = set(text.replace("\n", " ").split())
         previous_words = set(previous_text.replace("\n", " ").split())
         novelty = 1 if words and words != previous_words else 0
         score_components = {"text_density": round(min(len(text), 80) / 20, 2), "ocr_novelty": novelty * 2, "scene_change": 2 if frame.get("adjacent_similarity") is not None and frame["adjacent_similarity"] < .72 else 0}
         score = sum(score_components.values())
-        reason = "文字信息"
+        reasons = ["ocr_text_density"] if text else []
         if position <= 0.08:
-            score += 4; score_components["start"] = 4; reason = "开头钩子"
+            score += 4; score_components["start"] = 4; reasons.append("start")
         elif position >= 0.9:
-            score += 2; score_components["end"] = 2; reason = "结尾总结"
-        ranked.append({**frame, "score": round(score, 2), "score_components": score_components, "reason": reason})
+            score += 2; score_components["end"] = 2; reasons.append("end")
+        ranked.append({**frame, "score": round(score, 2), "score_components": score_components, "reasons": reasons})
         previous_text = text
     return sorted(ranked, key=lambda item: (-item["score"], item["time_seconds"]))[:limit]
 

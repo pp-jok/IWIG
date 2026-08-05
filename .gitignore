@@ -4,8 +4,18 @@
 output/
 __pycache__/
 *.mp4
+*.mov
 *.png
 *.jpg
 *.jpeg
-*.json
+
+# Runtime artifacts
 experiments/public_html_capture_mvp/artifacts/
+
+# Sensitive debug source is opt-in and must never be committed.
+*.private.json
+
+# Versioned contracts and fixtures remain visible to Git.
+!schemas/*.schema.json
+!tests/fixtures/**/*.json
+!docs/examples/**/*.json
