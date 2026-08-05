@@ -361,8 +361,10 @@ def public_candidate(candidate: dict) -> dict:
 
 
 def _redact_urls(value):
+    if isinstance(value, str) and value.startswith(("http://", "https://")):
+        return public_candidate({"url": value})
     if isinstance(value, dict):
-        return {key: (public_candidate({"url": child}) if isinstance(child, str) and key.lower().startswith("url") and child.startswith(("http://", "https://")) else _redact_urls(child)) for key, child in value.items()}
+        return {key: _redact_urls(child) for key, child in value.items()}
     if isinstance(value, list): return [_redact_urls(item) for item in value]
     return value
 

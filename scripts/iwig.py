@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from build_analysis_index import validate_analysis_index_schema, write_analysis_index
-from content_package import atomic_write_json, file_record, validate_content_package
+from content_package import atomic_write_json, file_record, find_existing_package, validate_content_package
 import run_capture
 from public_html_provider import note_id_from_url
 
@@ -28,10 +28,21 @@ def validate(run: Path) -> dict:
     except (OSError, json.JSONDecodeError) as error:
         return {"valid": False, "errors": [f"package_unreadable:{type(error).__name__}"], "warnings": []}
     errors, warnings = validate_content_package(package), []
+    def require_relative(relative, label):
+        if not isinstance(relative, str) or Path(relative).is_absolute() or ".." in Path(relative).parts:
+            errors.append(f"unsafe_path:{label}"); return
+        target = (run / relative).resolve()
+        if run.resolve() not in target.parents and target != run.resolve(): errors.append(f"unsafe_path:{label}")
+        elif not target.is_file(): errors.append(f"missing_artifact:{relative}")
     for record in [item for item in [package.get("media", {}).get("video"), package.get("media", {}).get("cover")] if item] + package.get("media", {}).get("images", []):
         path = run / record.get("path", "")
         if not path.is_file(): errors.append(f"missing_artifact:{record.get('path')}")
         elif record.get("sha256") and file_record(path, run)["sha256"] != record["sha256"]: errors.append(f"hash_mismatch:{record['path']}")
+    derived = package.get("derived", {})
+    for key in ("raw_path", "normalized_path"):
+        if derived.get("transcript", {}).get(key): require_relative(derived["transcript"][key], f"derived.transcript.{key}")
+    for frame in derived.get("keyframes", []): require_relative(frame.get("path"), f"frame:{frame.get('id')}")
+    if derived.get("timeline", {}).get("path"): require_relative(derived["timeline"]["path"], "derived.timeline.path")
     index_path = run / "derived" / "analysis_index.json"
     if index_path.is_file():
         try:
@@ -73,12 +84,20 @@ def main() -> int:
         run = Path(args.run_dir).expanduser().resolve()
         if (run / "content_package.json").is_file(): write_analysis_index(run)
         return code
+    root = Path(args.output_dir).expanduser().resolve()
+    existing = None if args.run_dir or args.force else find_existing_package(root, note_id_from_url(args.url))
+    if existing:
+        package = json.loads((existing / "content_package.json").read_text(encoding="utf-8"))
+        if args.json: print(json.dumps(_result(existing, package), ensure_ascii=False))
+        else: print(existing / "report.md")
+        return {"completed": 0, "partial": 2, "failed": 3}[package["status"]]
     run = _capture_run_dir(args); run.mkdir(parents=True, exist_ok=True)
     manifest = run / "content_package.json"
     if args.run_dir and any(run.iterdir()):
         try:
             existing = json.loads(manifest.read_text(encoding="utf-8"))
-            if existing.get("source", {}).get("note_id") != note_id_from_url(args.url):
+            expected, actual = note_id_from_url(args.url), existing.get("source", {}).get("note_id")
+            if expected and actual and actual != expected:
                 print("run_directory_identity_mismatch", file=sys.stderr); return 4
         except (OSError, json.JSONDecodeError):
             print("run_directory_identity_mismatch", file=sys.stderr); return 4

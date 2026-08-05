@@ -58,8 +58,11 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
 
 def process_transcript(result: dict, run: Path) -> None:
     video = _path(run, result["media"].get("video"))
-    if not video or not video.is_file() or result.get("transcript"):
-        if not video or not video.is_file(): _stage(result, "transcribe", "not_run", warnings=["video unavailable"])
+    previous = result.get("processing", {}).get("transcribe", {})
+    outputs = previous.get("output_paths", [])
+    if previous.get("status") == "completed" and outputs and all((run / item).is_file() for item in outputs):
+        return
+    if not video or not video.is_file():
         return
     try:
         normalized, metadata = transcribe(video)
@@ -85,22 +88,25 @@ def _ocr_records(run: Path, records: list[dict]) -> list[dict]:
 
 
 def process_ocr_cover(result: dict, run: Path, enabled: bool) -> None:
-    if enabled and result["media"].get("cover") and not (result.get("ocr") or {}).get("cover"):
+    previous = result.get("processing", {}).get("ocr_cover", {})
+    if enabled and result["media"].get("cover") and previous.get("status") != "completed":
         value = _ocr_records(run, [result["media"]["cover"]])[0]
         result.setdefault("ocr", {"images": [], "keyframes": []})["cover"] = value; result["derived"]["ocr"]["cover"] = value
         _stage(result, "ocr_cover", value["status"], [value["path"]], "macOS Vision")
 
 
 def process_ocr_images(result: dict, run: Path, enabled: bool) -> None:
-    if enabled and result["media"].get("images") and not (result.get("ocr") or {}).get("images"):
+    previous = result.get("processing", {}).get("ocr_images", {})
+    if enabled and result["media"].get("images") and previous.get("status") != "completed":
         values = _ocr_records(run, result["media"]["images"])
         result.setdefault("ocr", {"images": [], "keyframes": []})["images"] = values; result["derived"]["ocr"]["images"] = values
-        _stage(result, "ocr_images", "completed", [item["path"] for item in values], "macOS Vision")
+        _stage(result, "ocr_images", "completed" if values and all(item["status"] == "available" for item in values) else "failed", [item["path"] for item in values], "macOS Vision")
 
 
 def process_ocr_keyframes(result: dict, run: Path, enabled: bool) -> None:
     frames = result.get("derived", {}).get("keyframes", [])
-    if enabled and frames and not (result.get("ocr") or {}).get("keyframes"):
+    previous = result.get("processing", {}).get("ocr_keyframes", {})
+    if enabled and frames and previous.get("status") != "completed":
         records = _ocr_records(run, frames)
         for record, frame in zip(records, frames):
             frame["ocr"] = {key: value for key, value in record.items() if key != "path"}
@@ -108,7 +114,7 @@ def process_ocr_keyframes(result: dict, run: Path, enabled: bool) -> None:
         result["derived"]["ocr"]["keyframes"] = records
         duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds") or 1
         result["derived"]["selected_keyframes"] = select_structural_keyframes(frames, duration)
-        _stage(result, "ocr_keyframes", "completed", [item["path"] for item in records], "macOS Vision")
+        _stage(result, "ocr_keyframes", "completed" if records and all(item["status"] == "available" for item in records) else "failed", [item["path"] for item in records], "macOS Vision")
 
 
 def recompute_completeness(result: dict) -> None:

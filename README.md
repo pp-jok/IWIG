@@ -21,10 +21,10 @@ The default local home is `~/.iwig` (override with `IWIG_HOME`).
 ## Use
 
 ```bash
-python scripts/iwig.py capture --url 'https://www.xiaohongshu.com/explore/<NOTE_ID>' --keyframes --ocr
-python scripts/iwig.py enrich ~/.iwig/output/<RUN_ID> --keyframes --ocr
-python scripts/iwig.py validate ~/.iwig/output/<RUN_ID>
-python scripts/iwig.py reindex ~/.iwig/output/<RUN_ID>
+~/.iwig/.venv/bin/python scripts/iwig.py capture --url 'https://www.xiaohongshu.com/explore/<NOTE_ID>' --keyframes --ocr
+~/.iwig/.venv/bin/python scripts/iwig.py enrich ~/.iwig/output/<RUN_ID> --keyframes --ocr
+~/.iwig/.venv/bin/python scripts/iwig.py validate ~/.iwig/output/<RUN_ID>
+~/.iwig/.venv/bin/python scripts/iwig.py reindex ~/.iwig/output/<RUN_ID>
 ```
 
 `--json` emits one machine-readable result. The content package is the stable machine interface; `report.md` is only a human-readable summary. See [data contract](docs/data-contract.md), [analysis index](docs/analysis-index.md), and [migration](docs/migration-from-xhs-url-video-capture.md).
