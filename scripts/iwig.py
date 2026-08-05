@@ -28,10 +28,21 @@ def validate(run: Path) -> dict:
     except (OSError, json.JSONDecodeError) as error:
         return {"valid": False, "errors": [f"package_unreadable:{type(error).__name__}"], "warnings": []}
     errors, warnings = validate_content_package(package), []
+    def require_relative(relative, label):
+        if not isinstance(relative, str) or Path(relative).is_absolute() or ".." in Path(relative).parts:
+            errors.append(f"unsafe_path:{label}"); return
+        target = (run / relative).resolve()
+        if run.resolve() not in target.parents and target != run.resolve(): errors.append(f"unsafe_path:{label}")
+        elif not target.is_file(): errors.append(f"missing_artifact:{relative}")
     for record in [item for item in [package.get("media", {}).get("video"), package.get("media", {}).get("cover")] if item] + package.get("media", {}).get("images", []):
         path = run / record.get("path", "")
         if not path.is_file(): errors.append(f"missing_artifact:{record.get('path')}")
         elif record.get("sha256") and file_record(path, run)["sha256"] != record["sha256"]: errors.append(f"hash_mismatch:{record['path']}")
+    derived = package.get("derived", {})
+    for key in ("raw_path", "normalized_path"):
+        if derived.get("transcript", {}).get(key): require_relative(derived["transcript"][key], f"derived.transcript.{key}")
+    for frame in derived.get("keyframes", []): require_relative(frame.get("path"), f"frame:{frame.get('id')}")
+    if derived.get("timeline", {}).get("path"): require_relative(derived["timeline"]["path"], "derived.timeline.path")
     index_path = run / "derived" / "analysis_index.json"
     if index_path.is_file():
         try:
