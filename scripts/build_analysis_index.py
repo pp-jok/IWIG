@@ -25,11 +25,12 @@ def build_analysis_index(run: Path) -> dict:
     transcript_info = derived.get("transcript") or {}
     def read_json(path):
         try: candidate = safe_artifact_path(run, path)
-        except ValueError: return []
-        try: return json.loads(candidate.read_text(encoding="utf-8")) if candidate.is_file() else []
-        except (OSError, json.JSONDecodeError): return []
-    raw_segments = read_json(transcript_info.get("raw_path", ""))
-    normalized_segments = read_json(transcript_info.get("normalized_path", "")) or transcript
+        except ValueError as error: raise ValueError(f"invalid_transcript_path:{error}") from error
+        if not candidate.is_file(): raise ValueError(f"missing_transcript_artifact:{path}")
+        try: return json.loads(candidate.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error: raise ValueError(f"invalid_transcript_artifact:{path}") from error
+    raw_segments = read_json(transcript_info["raw_path"]) if transcript_info.get("raw_path") else []
+    normalized_segments = read_json(transcript_info["normalized_path"]) if transcript_info.get("normalized_path") else transcript
     evidence = {"field-post-title": {"type": "field", "source_path": "post.title"}, "field-post-description": {"type": "field", "source_path": "post.description"}, "field-post-tags": {"type": "field", "source_path": "post.tags"}, "field-author": {"type": "field", "source_path": "post.author"}, "field-metrics": {"type": "field", "source_path": "post.metrics"}}
     transcript = normalized_segments
     for index, segment in enumerate(transcript, 1): evidence[f"speech-{index:03}"] = {"type": "speech", "source_path": "derived/transcript_segments.json", "start": segment["start"], "end": segment["end"]}

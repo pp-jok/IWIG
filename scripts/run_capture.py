@@ -21,7 +21,13 @@ def _write_json(path: Path, value: object) -> None:
 
 
 def _stage(result: dict, name: str, status: str, outputs=None, tool=None, warnings=None) -> None:
-    result.setdefault("processing", {})[name] = {"status": status, "output_paths": outputs or [], "tool": tool, "started_at": result.get("processing", {}).get(name, {}).get("started_at", datetime.now(timezone.utc).isoformat()), "completed_at": datetime.now(timezone.utc).isoformat(), "warnings": warnings or []}
+    previous = result.get("processing", {}).get(name, {})
+    result.setdefault("processing", {})[name] = {"status": status, "output_paths": outputs or [], "input_sha256": previous.get("input_sha256"), "options_sha256": previous.get("options_sha256"), "tool": tool, "started_at": previous.get("started_at", datetime.now(timezone.utc).isoformat()), "completed_at": datetime.now(timezone.utc).isoformat(), "warnings": warnings or []}
+
+
+def _paths_exist(run: Path, paths: list[str]) -> bool:
+    try: return bool(paths) and all(safe_artifact_path(run, path).is_file() for path in paths)
+    except ValueError: return False
 
 
 def transcribe(video: Path) -> tuple[list[dict], dict]:
@@ -46,7 +52,7 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
         if "extract_keyframes" not in result.get("processing", {}): _stage(result, "extract_keyframes", "not_run", warnings=["keyframes not requested or video unavailable"])
         return
     existing = result.get("derived", {}).get("keyframes") or []
-    if existing and all((run / item["path"]).is_file() for item in existing):
+    if existing and _paths_exist(run, [item["path"] for item in existing]):
         _stage(result, "extract_keyframes", "completed", [item["path"] for item in existing], "PyAV", ["reused existing frames"])
         return
     extracted = extract_keyframes(video, run / "derived" / "keyframes")
@@ -61,8 +67,9 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
 def process_transcript(result: dict, run: Path) -> None:
     video = _path(run, result["media"].get("video"))
     previous = result.get("processing", {}).get("transcribe", {})
+    input_hash = file_record(video, run)["sha256"] if video and video.is_file() else None
     outputs = previous.get("output_paths", [])
-    if previous.get("status") == "completed" and outputs and all((run / item).is_file() for item in outputs):
+    if previous.get("status") == "completed" and previous.get("input_sha256") == input_hash and _paths_exist(run, outputs):
         return
     if not video or not video.is_file():
         return
@@ -77,6 +84,7 @@ def process_transcript(result: dict, run: Path) -> None:
         (run / "derived" / "transcript.txt").write_text("\n".join(item["text"] for item in normalized) + "\n", encoding="utf-8")
         (run / "derived" / "subtitles.srt").write_text(srt(normalized), encoding="utf-8")
         _stage(result, "transcribe", "completed", ["derived/transcript_raw_segments.json", "derived/transcript_segments.json", "derived/transcript.txt", "derived/subtitles.srt"], "faster-whisper")
+        result["processing"]["transcribe"]["input_sha256"] = input_hash
     except Exception as error:
         result.setdefault("errors", []).append({"stage": "transcript", "code": type(error).__name__})
         result.setdefault("limitations", []).append(f"本地口播转写失败：{type(error).__name__}")

@@ -115,6 +115,15 @@ class ContentPackageTests(unittest.TestCase):
     def test_safe_artifact_path_rejects_escape(self):
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaises(ValueError): safe_artifact_path(Path(temporary), "../../secret.json")
+            with self.assertRaises(ValueError): safe_artifact_path(Path(temporary), None)
+
+    def test_unsafe_cached_package_is_ignored(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary) / "bad"; run.mkdir()
+            package = new_content_package("completed", "https://example.test/n")
+            package["source"]["note_id"] = "note"; package["media"]["video"] = {"path": "../../outside.mp4", "sha256": "bad"}
+            (run / "content_package.json").write_text(json.dumps(package), encoding="utf-8")
+            self.assertIsNone(find_existing_package(Path(temporary), "note"))
 
     def test_empty_completed_transcript_is_a_real_zero(self):
         package = new_content_package("completed", "https://example.test/n")
