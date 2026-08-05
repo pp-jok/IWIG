@@ -88,6 +88,14 @@ def main() -> int:
     existing = None if args.run_dir or args.force else find_existing_package(root, note_id_from_url(args.url))
     if existing:
         package = json.loads((existing / "content_package.json").read_text(encoding="utf-8"))
+        index_path = existing / "derived" / "analysis_index.json"
+        needs_index = not index_path.is_file()
+        if not needs_index:
+            try:
+                index = json.loads(index_path.read_text(encoding="utf-8"))
+                needs_index = bool(validate_analysis_index_schema(index)) or index.get("source_package", {}).get("sha256") != file_record(existing / "content_package.json", existing)["sha256"]
+            except (OSError, json.JSONDecodeError): needs_index = True
+        if needs_index: write_analysis_index(existing)
         if args.json: print(json.dumps(_result(existing, package), ensure_ascii=False))
         else: print(existing / "report.md")
         return {"completed": 0, "partial": 2, "failed": 3}[package["status"]]

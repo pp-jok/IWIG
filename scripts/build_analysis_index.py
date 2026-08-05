@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 from datetime import datetime, timezone
 from pathlib import Path
-from content_package import atomic_write_json, file_record, validate_content_package
+from content_package import atomic_write_json, file_record, safe_artifact_path, validate_content_package
 
 
 def validate_analysis_index_schema(index: dict) -> list[str]:
@@ -24,7 +24,8 @@ def build_analysis_index(run: Path) -> dict:
     transcript = package.get("transcript") or []
     transcript_info = derived.get("transcript") or {}
     def read_json(path):
-        candidate = run / path
+        try: candidate = safe_artifact_path(run, path)
+        except ValueError: return []
         try: return json.loads(candidate.read_text(encoding="utf-8")) if candidate.is_file() else []
         except (OSError, json.JSONDecodeError): return []
     raw_segments = read_json(transcript_info.get("raw_path", ""))

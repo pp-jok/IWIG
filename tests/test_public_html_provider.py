@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from public_html_provider import PublicCaptureError, _request_with_validated_redirects, cover_candidates, image_candidates, redact_url, request_error
+from public_html_provider import PublicCaptureError, _redact_urls, _request_with_validated_redirects, cover_candidates, image_candidates, redact_url, request_error
 sys.path.insert(0, str(ROOT / "scripts"))
 from run_capture import render_public_report
 
@@ -85,6 +85,10 @@ class TransportErrorTests(unittest.TestCase):
         mapped = request_error(OSError("dns unavailable"))
         self.assertIsInstance(mapped, PublicCaptureError)
         self.assertEqual(str(mapped), "public_page_request_failed")
+
+    def test_selected_note_redacts_master_and_backup_urls(self):
+        data = _redact_urls({"masterUrl": "https://cdn.test/video?token=secret", "backupUrls": ["https://cdn.test/backup?token=secret"], "label": "unchanged"})
+        self.assertNotIn("https://", str(data)); self.assertEqual(data["label"], "unchanged")
 
 
 class RedirectSafetyTests(unittest.TestCase):
