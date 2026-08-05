@@ -7,14 +7,18 @@ import sys
 from pathlib import Path
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--home", default=str(Path(os.environ.get("IWIG_HOME", str(Path.home() / ".iwig")))))
-    args = parser.parse_args()
+    parser.add_argument("--dry-run", action="store_true")
+    args = parser.parse_args(argv)
     if sys.version_info < (3, 9):
         raise SystemExit("Python 3.9 or newer is required.")
     home = Path(args.home).expanduser()
     venv = home / ".venv"
+    if args.dry_run:
+        print(f"Would create IWIG runtime at {home}")
+        return 0
     home.mkdir(parents=True, exist_ok=True)
     subprocess.run([sys.executable, "-m", "venv", str(venv)], check=True)
     python = venv / "bin" / "python"

@@ -11,7 +11,7 @@ Capture one public Xiaohongshu note at a time through ordinary HTTPS. Do not use
 
 ```bash
 cd <SKILL_DIRECTORY>
-python3 scripts/setup.py
+python3 scripts/iwig.py setup
 ```
 
 This creates `~/.iwig/.venv` and installs local dependencies. No OpenAI API key is required.
@@ -32,13 +32,13 @@ The command writes `content_package.json`, `report.md`, selected-note/request pr
 For a direct note URL, an existing package with the same note ID under the output directory is reused rather than downloaded again. Use `--run-dir` to explicitly continue working in a chosen directory.
 Pass `--force` to deliberately capture a fresh snapshot.
 
-Use `scripts/build_analysis_index.py --run-dir <RUN_ID>` to create the strictly local `derived/analysis_index.json` projection. It is the intended no-network input for downstream breakdown and analysis Skills.
+Use `python scripts/iwig.py reindex <RUN_ID>` to create the strictly local `derived/analysis_index.json` projection. It is the intended no-network input for downstream breakdown and analysis Skills.
 
 ## Boundaries
 
 - Capture only one URL per invocation, with ordinary HTTPS and a fixed transparent User-Agent.
 - Validate every page and media redirect hop, reject private/local DNS targets, and stop after five redirects. Redact token-like query parameters from reports and default manifests.
-- Stop immediately on login, verification, rate limiting, missing public post data, missing direct video, or inaccessible content.
+- Stop on login, verification, rate limiting, missing public post data, or inaccessible content. Missing media produces a structured partial package so text-only or image-note facts remain usable.
 - Do not collect comments or replies. The report must state that comments were intentionally not collected.
 - Use only complete direct video and cover URLs exposed in the selected current-note object. Never invent a URL from a file ID, refresh a token, create a signature, or retry through a private endpoint.
 - Keep local ASR only for successfully downloaded media. Do not use online transcription services.

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import hashlib
+from datetime import datetime, timezone
 from datetime import datetime
 from pathlib import Path
 
@@ -17,6 +18,10 @@ from public_html_provider import PublicCaptureError, capture_public_note, note_i
 
 def _write_json(path: Path, value: object) -> None:
     atomic_write_json(path, value)
+
+
+def _stage(result: dict, name: str, status: str, outputs=None, tool=None, warnings=None) -> None:
+    result.setdefault("processing", {})[name] = {"status": status, "output_paths": outputs or [], "tool": tool, "started_at": result.get("processing", {}).get(name, {}).get("started_at", datetime.now(timezone.utc).isoformat()), "completed_at": datetime.now(timezone.utc).isoformat(), "warnings": warnings or []}
 
 
 def transcribe(video: Path) -> tuple[list[dict], dict]:
@@ -36,9 +41,11 @@ def _path(run: Path, record: dict | None) -> Path | None:
 def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
     video = _path(run, result["media"].get("video"))
     if not enabled or not video or not video.is_file():
+        _stage(result, "extract_keyframes", "not_run", warnings=["keyframes not requested or video unavailable"])
         return
-    existing = result.get("derived", {}).get("keyframes") and {"status": "available", "frames": result["derived"]["keyframes"]}
-    if existing.get("status") == "available" and all((run / "derived" / "keyframes" / item["path"]).is_file() for item in existing.get("frames", [])):
+    existing = result.get("derived", {}).get("keyframes") or []
+    if existing and all((run / item["path"]).is_file() for item in existing):
+        _stage(result, "extract_keyframes", "completed", [item["path"] for item in existing], "PyAV", ["reused existing frames"])
         return
     extracted = extract_keyframes(video, run / "derived" / "keyframes")
     frames = extracted.get("frames", [])
@@ -46,11 +53,13 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
         frame.update({"id": f"frame-{index:03}", "path": f"derived/keyframes/{frame['path']}", "perceptual_hash": perceptual_hash(run / f"derived/keyframes/{frame['path']}"), "ocr": {"status": "not_run", "text": "", "lines": []}})
     result["derived"]["keyframes"] = frames
     result["derived"]["scenes"] = scene_boundaries(frames)
+    _stage(result, "extract_keyframes", extracted.get("status", "failed"), [item["path"] for item in frames], "PyAV")
 
 
 def process_transcript(result: dict, run: Path) -> None:
     video = _path(run, result["media"].get("video"))
     if not video or not video.is_file() or result.get("transcript"):
+        if not video or not video.is_file(): _stage(result, "transcribe", "not_run", warnings=["video unavailable"])
         return
     try:
         normalized, metadata = transcribe(video)
@@ -62,9 +71,11 @@ def process_transcript(result: dict, run: Path) -> None:
         _write_json(run / "derived" / "transcript_segments.json", normalized)
         (run / "derived" / "transcript.txt").write_text("\n".join(item["text"] for item in normalized) + "\n", encoding="utf-8")
         (run / "derived" / "subtitles.srt").write_text(srt(normalized), encoding="utf-8")
+        _stage(result, "transcribe", "completed", ["derived/transcript_raw_segments.json", "derived/transcript_segments.json", "derived/subtitles.srt"], "faster-whisper")
     except Exception as error:
         result.setdefault("errors", []).append({"stage": "transcript", "code": type(error).__name__})
         result.setdefault("limitations", []).append(f"本地口播转写失败：{type(error).__name__}")
+        _stage(result, "transcribe", "failed", tool="faster-whisper", warnings=[type(error).__name__])
 
 
 def _ocr_records(run: Path, records: list[dict]) -> list[dict]:
@@ -77,12 +88,14 @@ def process_ocr_cover(result: dict, run: Path, enabled: bool) -> None:
     if enabled and result["media"].get("cover") and not (result.get("ocr") or {}).get("cover"):
         value = _ocr_records(run, [result["media"]["cover"]])[0]
         result.setdefault("ocr", {"images": [], "keyframes": []})["cover"] = value; result["derived"]["ocr"]["cover"] = value
+        _stage(result, "ocr_cover", value["status"], [value["path"]], "macOS Vision")
 
 
 def process_ocr_images(result: dict, run: Path, enabled: bool) -> None:
     if enabled and result["media"].get("images") and not (result.get("ocr") or {}).get("images"):
         values = _ocr_records(run, result["media"]["images"])
         result.setdefault("ocr", {"images": [], "keyframes": []})["images"] = values; result["derived"]["ocr"]["images"] = values
+        _stage(result, "ocr_images", "completed", [item["path"] for item in values], "macOS Vision")
 
 
 def process_ocr_keyframes(result: dict, run: Path, enabled: bool) -> None:
@@ -95,6 +108,7 @@ def process_ocr_keyframes(result: dict, run: Path, enabled: bool) -> None:
         result["derived"]["ocr"]["keyframes"] = records
         duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds") or 1
         result["derived"]["selected_keyframes"] = select_structural_keyframes(frames, duration)
+        _stage(result, "ocr_keyframes", "completed", [item["path"] for item in records], "macOS Vision")
 
 
 def recompute_completeness(result: dict) -> None:
@@ -119,6 +133,7 @@ def process_local_stages(result: dict, run: Path, *, keyframes: bool, ocr: bool)
     timeline = build_timeline(result.get("transcript") or [], frames, result.get("derived", {}).get("scenes", []), duration)
     _write_json(run / "derived" / "timeline.json", timeline)
     result["derived"]["timeline"] = {"path": "derived/timeline.json"}
+    _stage(result, "build_timeline", "completed", ["derived/timeline.json"])
     recompute_completeness(result)
     identity = result["identity"]
     source, post, video = result["source"], result["post"], result["media"].get("video")
