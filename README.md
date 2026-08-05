@@ -1,75 +1,45 @@
-# XHS Public Content Package Capture
+# IWIG
 
-将一条公开小红书视频或图文笔记转换为可追溯、可复用的本地内容包，供 Codex 后续拆解、对比、归档或内容理解使用。
+Local-first public content capture and multimodal analysis packaging for Xiaohongshu.
 
-只读取公开 HTML：不使用浏览器自动化、Cookie、登录、JavaScript 执行、私有接口、签名、代理或评论接口。
-
-## 能力
-
-- 规范化原始链接、跳转后链接与笔记 ID；直接链接支持按 ID 复用已有内容包，`--force` 可生成新快照。
-- 提取标题、正文、标签、作者公开信息、发布时间与公开互动数据。
-- 视频笔记：视频、封面、文件哈希、时长、分辨率、编码、本地转写、时间戳分段、SRT。
-- 图文笔记：公开暴露的全部图片按原始顺序保存，并记录 PNG、JPEG、WebP 的尺寸、格式与哈希。
-- 可选本地视觉处理：关键帧、macOS Vision OCR、封面/图文页/关键帧文字。
-- 默认保存选中的笔记对象、请求元数据、候选地址、实际使用媒体地址、完整度与限制说明；完整 HTML 与初始化数据仅在 `--keep-raw-source` 时保存。
-- 允许补处理已有内容包，不需要再次请求小红书或下载媒体。
-
-## 安装
-
-```bash
-git clone https://github.com/pp-jok/xhs-url-video-capture.git
-cd xhs-url-video-capture
-python3 scripts/setup.py
-```
-
-运行环境位于 `~/.xhs-url-video-capture/.venv`。首次使用本地转写会下载语音模型。
-
-## 采集
-
-```bash
-~/.xhs-url-video-capture/.venv/bin/python scripts/run_capture.py \
-  --url 'https://www.xiaohongshu.com/explore/<NOTE_ID>' \
-  --output-dir ~/.xhs-url-video-capture/output \
-  --max-video-mb 300 \
-  --keyframes --ocr
-```
-
-`--keyframes` 抽取候选画面并选择结构关键帧；`--ocr` 使用本地 macOS Vision 识别封面、图文页与关键帧文字。两者均可省略，且不会上传媒体。
-
-对已有包补做关键帧和 OCR：
-
-```bash
-~/.xhs-url-video-capture/.venv/bin/python scripts/run_capture.py \
-  --enrich-dir ~/.xhs-url-video-capture/output/<RUN_ID> \
-  --keyframes --ocr
-```
-
-## 输出结构
+IWIG converts one user-provided public Xiaohongshu note into a traceable local content package and analysis index. It never uses browser automation, cookies, login, JavaScript execution, private APIs, signatures, proxies, or hosted AI services.
 
 ```text
-<RUN_ID>/
-  content_package.json       # 供其他 Skill 使用的结构化接口
-  report.md                  # 人读摘要、完整度与限制
-  source/                    # 默认的选中笔记、请求元数据、媒体候选（可选原始 HTML/状态）
-  media/                     # 视频、封面或有序图文页
-  derived/                   # 转写、SRT、关键帧
+public note URL → public HTML provider → content_package.json → local media/ASR/OCR → analysis_index.json
 ```
 
-`content_package.json` 的每个完整度项都是 `{status,count,reason}`，会区分 `available`、`zero`、`not_exposed`、`failed`、`not_run` 与 `intentionally_omitted`，避免把缺失数据误判为零。媒体路径始终相对运行目录。
-
-可离线生成面向分析 Skill 的投影（不会请求网络）：
+## Install
 
 ```bash
-~/.xhs-url-video-capture/.venv/bin/python scripts/build_analysis_index.py --run-dir <RUN_ID>
+git clone https://github.com/pp-jok/IWIG.git
+cd IWIG
+python3 scripts/iwig.py setup
 ```
 
-它生成 `derived/analysis_index.json`，包含文字、媒体、时间线、来源字段、质量摘要及缺失警告。
+The default local home is `~/.iwig` (override with `IWIG_HOME`).
 
-## 限制
+## Use
 
-- 每次仅处理一条用户提供的公开链接；遇到登录、验证、限流或无法访问即停止。
-- 页面与媒体重定向逐跳进行 URL、DNS/IP 与五跳上限校验；报告会隐藏 token 类查询参数。
-- 不采集评论正文、二级回复、作者主页深度信息、未加载或推荐内容。
-- 只使用页面当前直接暴露的完整媒体 URL，不猜测地址、不补签名。
-- 本地转写与 OCR 均可能存在识别误差；OCR 仅支持 macOS Vision，首次调用可能需要编译 Swift 工具。
-- 请遵守平台条款、适用法律与创作者权利。
+```bash
+python scripts/iwig.py capture --url 'https://www.xiaohongshu.com/explore/<NOTE_ID>' --keyframes --ocr
+python scripts/iwig.py enrich ~/.iwig/output/<RUN_ID> --keyframes --ocr
+python scripts/iwig.py validate ~/.iwig/output/<RUN_ID>
+python scripts/iwig.py reindex ~/.iwig/output/<RUN_ID>
+```
+
+`--json` emits one machine-readable result. The content package is the stable machine interface; `report.md` is only a human-readable summary. See [data contract](docs/data-contract.md), [analysis index](docs/analysis-index.md), and [migration](docs/migration-from-xhs-url-video-capture.md).
+
+## Output and boundaries
+
+Each snapshot contains a schema-validated `content_package.json`, derived transcript/frames/OCR/timeline, and a local `derived/analysis_index.json`. Default manifests redact token-like URLs and media signatures. Raw source or sensitive candidates require explicit diagnostic flags and must not be committed.
+
+IWIG does not collect comment bodies, operate accounts, bypass access controls, construct media URLs, remove watermarks, or perform publishing actions. Follow platform terms, copyright, and applicable law.
+
+## Development
+
+```bash
+python -m unittest discover -s tests -v
+python -m py_compile scripts/*.py
+```
+
+Live image-note validation is `pending_user_test`; IWIG never searches for validation posts on its own.

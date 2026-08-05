@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import hashlib
 from datetime import datetime
 from pathlib import Path
 
-from content_package import (build_timeline, completeness, extract_keyframes, field_status,
+from content_package import (atomic_write_json, build_timeline, completeness, extract_keyframes, field_status,
                              find_existing_package, new_content_package, ocr_macos,
                              ocr_macos_batch, perceptual_hash, scene_boundaries, select_structural_keyframes, should_reuse, srt,
                              validate_content_package)
@@ -15,8 +16,7 @@ from public_html_provider import PublicCaptureError, capture_public_note, note_i
 
 
 def _write_json(path: Path, value: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    atomic_write_json(path, value)
 
 
 def transcribe(video: Path) -> tuple[list[dict], dict]:
@@ -37,14 +37,15 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
     video = _path(run, result["media"].get("video"))
     if not enabled or not video or not video.is_file():
         return
-    existing = result.get("keyframes") or {}
+    existing = result.get("derived", {}).get("keyframes") and {"status": "available", "frames": result["derived"]["keyframes"]}
     if existing.get("status") == "available" and all((run / "derived" / "keyframes" / item["path"]).is_file() for item in existing.get("frames", [])):
         return
-    result["keyframes"] = extract_keyframes(video, run / "derived" / "keyframes")
-    for frame in result["keyframes"].get("frames", []):
-        frame["path"] = f"derived/keyframes/{frame['path']}"
-        frame["perceptual_hash"] = perceptual_hash(run / frame["path"])
-    result["keyframes"]["scenes"] = scene_boundaries(result["keyframes"].get("frames", []))
+    extracted = extract_keyframes(video, run / "derived" / "keyframes")
+    frames = extracted.get("frames", [])
+    for index, frame in enumerate(frames, 1):
+        frame.update({"id": f"frame-{index:03}", "path": f"derived/keyframes/{frame['path']}", "perceptual_hash": perceptual_hash(run / f"derived/keyframes/{frame['path']}"), "ocr": {"status": "not_run", "text": "", "lines": []}})
+    result["derived"]["keyframes"] = frames
+    result["derived"]["scenes"] = scene_boundaries(frames)
 
 
 def process_transcript(result: dict, run: Path) -> None:
@@ -54,8 +55,9 @@ def process_transcript(result: dict, run: Path) -> None:
     try:
         normalized, metadata = transcribe(video)
         raw = metadata.pop("raw_segments")
-        result["transcript"] = normalized
+        result["transcript"] = normalized  # compatibility
         result["transcript_metadata"] = metadata
+        result["derived"]["transcript"] = {"raw_path": "derived/transcript_raw_segments.json", "normalized_path": "derived/transcript_segments.json", "metadata": metadata}
         _write_json(run / "derived" / "transcript_raw_segments.json", raw)
         _write_json(run / "derived" / "transcript_segments.json", normalized)
         (run / "derived" / "transcript.txt").write_text("\n".join(item["text"] for item in normalized) + "\n", encoding="utf-8")
@@ -73,22 +75,26 @@ def _ocr_records(run: Path, records: list[dict]) -> list[dict]:
 
 def process_ocr_cover(result: dict, run: Path, enabled: bool) -> None:
     if enabled and result["media"].get("cover") and not (result.get("ocr") or {}).get("cover"):
-        result.setdefault("ocr", {"images": [], "keyframes": []})["cover"] = _ocr_records(run, [result["media"]["cover"]])[0]
+        value = _ocr_records(run, [result["media"]["cover"]])[0]
+        result.setdefault("ocr", {"images": [], "keyframes": []})["cover"] = value; result["derived"]["ocr"]["cover"] = value
 
 
 def process_ocr_images(result: dict, run: Path, enabled: bool) -> None:
     if enabled and result["media"].get("images") and not (result.get("ocr") or {}).get("images"):
-        result.setdefault("ocr", {"images": [], "keyframes": []})["images"] = _ocr_records(run, result["media"]["images"])
+        values = _ocr_records(run, result["media"]["images"])
+        result.setdefault("ocr", {"images": [], "keyframes": []})["images"] = values; result["derived"]["ocr"]["images"] = values
 
 
 def process_ocr_keyframes(result: dict, run: Path, enabled: bool) -> None:
-    frames = (result.get("keyframes") or {}).get("frames", [])
+    frames = result.get("derived", {}).get("keyframes", [])
     if enabled and frames and not (result.get("ocr") or {}).get("keyframes"):
         records = _ocr_records(run, frames)
-        for record, frame in zip(records, frames): record["time_seconds"] = frame["time_seconds"]
+        for record, frame in zip(records, frames):
+            frame["ocr"] = {key: value for key, value in record.items() if key != "path"}
         result.setdefault("ocr", {"images": [], "keyframes": []})["keyframes"] = records
+        result["derived"]["ocr"]["keyframes"] = records
         duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds") or 1
-        result["keyframes"]["selected"] = select_structural_keyframes(records, duration)
+        result["derived"]["selected_keyframes"] = select_structural_keyframes(frames, duration)
 
 
 def recompute_completeness(result: dict) -> None:
@@ -108,10 +114,17 @@ def process_local_stages(result: dict, run: Path, *, keyframes: bool, ocr: bool)
     process_ocr_cover(result, run, ocr)
     process_ocr_images(result, run, ocr)
     process_ocr_keyframes(result, run, ocr)
-    if result.get("transcript"):
-        frames = (result.get("ocr") or {}).get("keyframes") or (result.get("keyframes") or {}).get("frames") or []
-        _write_json(run / "derived" / "timeline.json", build_timeline(result["transcript"], frames))
+    frames = result.get("derived", {}).get("keyframes", [])
+    duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
+    timeline = build_timeline(result.get("transcript") or [], frames, result.get("derived", {}).get("scenes", []), duration)
+    _write_json(run / "derived" / "timeline.json", timeline)
+    result["derived"]["timeline"] = {"path": "derived/timeline.json"}
     recompute_completeness(result)
+    identity = result["identity"]
+    source, post, video = result["source"], result["post"], result["media"].get("video")
+    identity.update({"note_id": source.get("note_id"), "author_id": post.get("author", {}).get("id"), "snapshot_at": source.get("captured_at"), "primary_media_sha256": (video or {}).get("sha256")})
+    seed = "\n".join(str(item or "") for item in (source.get("note_id"), post.get("title"), post.get("description"), identity["author_id"], identity["primary_media_sha256"]))
+    identity["content_fingerprint"] = hashlib.sha256(seed.encode()).hexdigest(); identity["package_id"] = hashlib.sha256(f"xiaohongshu:{source.get('note_id')}".encode()).hexdigest()[:20]; identity["snapshot_id"] = hashlib.sha256(f"{identity['package_id']}:{identity['snapshot_at']}".encode()).hexdigest()[:20]
 
 
 def render_public_report(result: dict) -> str:
@@ -122,13 +135,13 @@ def render_public_report(result: dict) -> str:
     return "\n".join(lines + ["", "## 限制", "", *[f"- {item}" for item in result.get("limitations") or []], ""])
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url"); parser.add_argument("--output-dir", default="output"); parser.add_argument("--run-dir")
     parser.add_argument("--timeout", type=float, default=20); parser.add_argument("--max-video-mb", type=int, default=300)
     parser.add_argument("--force", action="store_true"); parser.add_argument("--keyframes", action="store_true"); parser.add_argument("--ocr", action="store_true")
     parser.add_argument("--enrich-dir"); parser.add_argument("--keep-raw-source", action="store_true")
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     if args.enrich_dir:
         output = Path(args.enrich_dir).expanduser().resolve(); manifest = output / "content_package.json"
         result = json.loads(manifest.read_text(encoding="utf-8")); process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr)
