@@ -70,8 +70,10 @@ def atomic_write_json(path: Path, value: object) -> None:
 
 def safe_artifact_path(run_dir: Path, relative: str) -> Path:
     """Resolve a package path without permitting absolute, parent, or symlink escapes."""
+    if not isinstance(relative, str) or not relative:
+        raise ValueError("unsafe_relative_path")
     candidate = Path(relative)
-    if not relative or candidate.is_absolute() or ".." in candidate.parts:
+    if candidate.is_absolute() or ".." in candidate.parts:
         raise ValueError("unsafe_relative_path")
     root, target = run_dir.resolve(), (run_dir / candidate).resolve()
     if root not in target.parents and target != root:
@@ -144,7 +146,7 @@ def find_existing_package(output_dir: Path, note_id: str | None) -> Path | None:
             if package.get("source", {}).get("note_id") == note_id and package.get("status") == "completed" and not package.get("stale") and not validate_content_package(package):
                 media = package.get("media", {}); records = [item for item in [media.get("video"), media.get("cover")] if item] + media.get("images", [])
                 if all(safe_artifact_path(manifest.parent, record["path"]).is_file() and file_record(safe_artifact_path(manifest.parent, record["path"]), manifest.parent)["sha256"] == record.get("sha256") for record in records): candidates.append((package["source"].get("captured_at") or "", manifest.parent))
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, ValueError, KeyError, TypeError):
             continue
     return max(candidates, default=("", None))[1]
 
