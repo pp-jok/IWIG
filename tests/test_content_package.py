@@ -63,7 +63,7 @@ class ContentPackageTests(unittest.TestCase):
             package = new_content_package("completed", "https://example.test/abc")
             package["source"]["note_id"] = "abc"
             (run / "content_package.json").write_text(__import__("json").dumps(package), encoding="utf-8")
-            self.assertEqual(find_existing_package(Path(temporary), "abc"), run)
+            self.assertIsNone(find_existing_package(Path(temporary), "abc"))
 
     def test_force_disables_package_reuse(self):
         self.assertTrue(should_reuse(Path("run"), force=False))

@@ -21,6 +21,17 @@ def _result(run: Path, package: dict) -> dict:
     return {"status": package["status"], "run_dir": str(run), "content_package": str(run / "content_package.json"), "analysis_index": str(run / "derived" / "analysis_index.json"), "report": str(run / "report.md")}
 
 
+def _rebuild_index_safely(run: Path, package: dict) -> str | None:
+    try:
+        write_analysis_index(run); return None
+    except ValueError as error:
+        package["status"] = "partial"
+        package.setdefault("errors", []).append({"stage": "analysis_index", "code": "analysis_index_build_failed", "detail": str(error)})
+        package.setdefault("limitations", []).append("analysis_index_build_failed")
+        atomic_write_json(run / "content_package.json", package)
+        return str(error)
+
+
 def validate(run: Path) -> dict:
     package_path = run / "content_package.json"
     try:
@@ -83,7 +94,9 @@ def main() -> int:
     if args.command == "enrich":
         code = run_capture.main(["--enrich-dir", args.run_dir] + (["--keyframes"] if args.keyframes else []) + (["--ocr"] if args.ocr else []))
         run = Path(args.run_dir).expanduser().resolve()
-        if (run / "content_package.json").is_file(): write_analysis_index(run)
+        if (run / "content_package.json").is_file():
+            package = json.loads((run / "content_package.json").read_text(encoding="utf-8"))
+            return 2 if _rebuild_index_safely(run, package) else code
         return code
     root = Path(args.output_dir).expanduser().resolve()
     existing = None if args.run_dir or args.force else find_existing_package(root, note_id_from_url(args.url))
@@ -96,10 +109,13 @@ def main() -> int:
                 index = json.loads(index_path.read_text(encoding="utf-8"))
                 needs_index = bool(validate_analysis_index_schema(index)) or index.get("source_package", {}).get("sha256") != file_record(existing / "content_package.json", existing)["sha256"]
             except (OSError, json.JSONDecodeError): needs_index = True
-        if needs_index: write_analysis_index(existing)
-        if args.json: print(json.dumps(_result(existing, package), ensure_ascii=False))
-        else: print(existing / "report.md")
-        return {"completed": 0, "partial": 2, "failed": 3}[package["status"]]
+        if needs_index and _rebuild_index_safely(existing, package):
+            existing = None
+        if existing:
+            package = json.loads((existing / "content_package.json").read_text(encoding="utf-8"))
+            if args.json: print(json.dumps(_result(existing, package), ensure_ascii=False))
+            else: print(existing / "report.md")
+            return {"completed": 0, "partial": 2, "failed": 3}[package["status"]]
     run = _capture_run_dir(args); run.mkdir(parents=True, exist_ok=True)
     manifest = run / "content_package.json"
     if args.run_dir and any(run.iterdir()):
@@ -115,7 +131,8 @@ def main() -> int:
             print("run_directory_identity_mismatch", file=sys.stderr); return 4
     forwarded = ["--url", args.url, "--run-dir", str(run), "--timeout", str(args.timeout), "--max-video-mb", str(args.max_video_mb)] + (["--force"] if args.force else []) + (["--keyframes"] if args.keyframes else []) + (["--ocr"] if args.ocr else []) + (["--keep-raw-source"] if args.keep_raw_source else [])
     with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout): run_capture.main(forwarded)
-    package = json.loads((run / "content_package.json").read_text(encoding="utf-8")); write_analysis_index(run)
+    package = json.loads((run / "content_package.json").read_text(encoding="utf-8")); _rebuild_index_safely(run, package)
+    package = json.loads((run / "content_package.json").read_text(encoding="utf-8"))
     if args.json: print(json.dumps(_result(run, package), ensure_ascii=False))
     return {"completed": 0, "partial": 2, "failed": 3}.get(package["status"], 6)
 
