@@ -36,10 +36,13 @@ def build_analysis_index(run: Path) -> dict:
     for frame in derived.get("keyframes", []): evidence[frame["id"]] = {"type": "frame", "source_path": frame["path"], "at": frame["time_seconds"]}
     for scene in derived.get("scenes", []): evidence[scene["id"]] = {"type": "scene", "start": scene["start_seconds"], "end": scene["end_seconds"]}
     ocr = derived.get("ocr", {})
+    frame_ids = {frame.get("path"): frame.get("id") for frame in derived.get("keyframes", [])}
     for kind in ("cover", "images", "keyframes"):
         records = [ocr.get(kind)] if kind == "cover" and ocr.get(kind) else (ocr.get(kind) or [])
         for number, record in enumerate(records, 1):
-            if record and record.get("text"): evidence[f"ocr-{kind}-{number:03}"] = {"type": "ocr", "source_path": record.get("path"), "text": record["text"]}
+            if record and record.get("text"):
+                evidence_id = f"ocr-{frame_ids[record['path']]}" if kind == "keyframes" and record.get("path") in frame_ids else f"ocr-{'cover' if kind == 'cover' else 'image'}-{number:03}"
+                evidence[evidence_id] = {"type": "ocr", "source_path": record.get("path"), "text": record["text"]}
     all_ocr = [record for kind in ("cover", "images", "keyframes") for record in (([ocr.get(kind)] if kind == "cover" and ocr.get(kind) else (ocr.get(kind) or [])) or [])]
     post, media = package.get("post", {}), package.get("media", {})
     readiness = {"post_copy": "ready" if post.get("description") else "partial", "cover": "ready" if media.get("cover") else "unavailable", "video_structure": "ready" if derived.get("keyframes") else "unavailable", "visual_text": "ready" if any(record.get("text") for record in all_ocr) else "unavailable", "transcript": "ready" if transcript else "unavailable", "comments": "unavailable", "engagement": "snapshot_only" if any(value is not None for value in post.get("metrics", {}).values()) else "unavailable"}

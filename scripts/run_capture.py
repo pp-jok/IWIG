@@ -12,7 +12,7 @@ from pathlib import Path
 from content_package import (atomic_write_json, build_timeline, completeness, extract_keyframes, field_status,
                              find_existing_package, new_content_package, ocr_macos,
                              ocr_macos_batch, perceptual_hash, scene_boundaries, select_structural_keyframes, should_reuse, srt,
-                             validate_content_package)
+                             safe_artifact_path, validate_content_package)
 from public_html_provider import PublicCaptureError, capture_public_note, note_id_from_url, redact_url
 
 
@@ -35,7 +35,9 @@ def transcribe(video: Path) -> tuple[list[dict], dict]:
 
 
 def _path(run: Path, record: dict | None) -> Path | None:
-    return run / record["path"] if record and record.get("path") else None
+    if not record or not record.get("path"): return None
+    try: return safe_artifact_path(run, record["path"])
+    except ValueError: return None
 
 
 def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
@@ -74,7 +76,7 @@ def process_transcript(result: dict, run: Path) -> None:
         _write_json(run / "derived" / "transcript_segments.json", normalized)
         (run / "derived" / "transcript.txt").write_text("\n".join(item["text"] for item in normalized) + "\n", encoding="utf-8")
         (run / "derived" / "subtitles.srt").write_text(srt(normalized), encoding="utf-8")
-        _stage(result, "transcribe", "completed", ["derived/transcript_raw_segments.json", "derived/transcript_segments.json", "derived/subtitles.srt"], "faster-whisper")
+        _stage(result, "transcribe", "completed", ["derived/transcript_raw_segments.json", "derived/transcript_segments.json", "derived/transcript.txt", "derived/subtitles.srt"], "faster-whisper")
     except Exception as error:
         result.setdefault("errors", []).append({"stage": "transcript", "code": type(error).__name__})
         result.setdefault("limitations", []).append(f"本地口播转写失败：{type(error).__name__}")
@@ -126,8 +128,8 @@ def recompute_completeness(result: dict) -> None:
         "title": field_status(result["post"].get("title")), "description": field_status(result["post"].get("description")),
         "video": field_status(video), "images": field_status(result["media"].get("images")),
         "comments": completeness("intentionally_omitted", reason="public HTML capture does not collect comment bodies"),
-        "transcript": field_status(result.get("transcript")) if video else completeness("not_run", reason="video unavailable"),
-        "ocr": field_status(result.get("ocr")) if result.get("ocr") else completeness("not_run", reason="OCR not requested"),
+        "transcript": completeness("zero", 0, "transcription completed; no speech detected") if result.get("processing", {}).get("transcribe", {}).get("status") == "completed" and result.get("transcript") == [] else (field_status(result.get("transcript")) if video else completeness("not_run", reason="video unavailable")),
+        "ocr": completeness("available" if any(stage.get("status") == "completed" for name, stage in result.get("processing", {}).items() if name.startswith("ocr_")) else "failed", reason="derived from OCR stages") if any(name.startswith("ocr_") for name in result.get("processing", {})) else completeness("not_run", reason="OCR not requested"),
     }
 
 

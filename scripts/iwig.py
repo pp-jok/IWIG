@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 
 from build_analysis_index import validate_analysis_index_schema, write_analysis_index
-from content_package import atomic_write_json, file_record, find_existing_package, validate_content_package
+from content_package import atomic_write_json, file_record, find_existing_package, safe_artifact_path, validate_content_package
 import run_capture
 from public_html_provider import note_id_from_url
 
@@ -35,7 +35,8 @@ def validate(run: Path) -> dict:
         if run.resolve() not in target.parents and target != run.resolve(): errors.append(f"unsafe_path:{label}")
         elif not target.is_file(): errors.append(f"missing_artifact:{relative}")
     for record in [item for item in [package.get("media", {}).get("video"), package.get("media", {}).get("cover")] if item] + package.get("media", {}).get("images", []):
-        path = run / record.get("path", "")
+        try: path = safe_artifact_path(run, record.get("path", ""))
+        except ValueError: errors.append(f"unsafe_path:media:{record.get('path')}"); continue
         if not path.is_file(): errors.append(f"missing_artifact:{record.get('path')}")
         elif record.get("sha256") and file_record(path, run)["sha256"] != record["sha256"]: errors.append(f"hash_mismatch:{record['path']}")
     derived = package.get("derived", {})
@@ -105,7 +106,10 @@ def main() -> int:
         try:
             existing = json.loads(manifest.read_text(encoding="utf-8"))
             expected, actual = note_id_from_url(args.url), existing.get("source", {}).get("note_id")
+            same_url = existing.get("source", {}).get("input_url") == __import__("public_html_provider").redact_url(args.url)
             if expected and actual and actual != expected:
+                print("run_directory_identity_mismatch", file=sys.stderr); return 4
+            if not expected and actual and not same_url:
                 print("run_directory_identity_mismatch", file=sys.stderr); return 4
         except (OSError, json.JSONDecodeError):
             print("run_directory_identity_mismatch", file=sys.stderr); return 4

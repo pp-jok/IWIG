@@ -116,6 +116,15 @@ class ContentPackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaises(ValueError): safe_artifact_path(Path(temporary), "../../secret.json")
 
+    def test_empty_completed_transcript_is_a_real_zero(self):
+        package = new_content_package("completed", "https://example.test/n")
+        package["media"]["video"] = {"path": "media/video.mp4"}
+        package["transcript"] = []
+        package["processing"]["transcribe"] = {"status": "completed"}
+        from run_capture import recompute_completeness
+        recompute_completeness(package)
+        self.assertEqual(package["completeness"]["transcript"]["status"], "zero")
+
 
 if __name__ == "__main__":
     unittest.main()
