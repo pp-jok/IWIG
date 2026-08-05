@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The single IWIG command line entrypoint."""
 from __future__ import annotations
-import argparse, json, os, sys
+import argparse, contextlib, json, os, sys
 from pathlib import Path
 from build_analysis_index import build_analysis_index, validate_analysis_index_schema, write_analysis_index
 from content_package import atomic_write_json, validate_content_package
@@ -34,7 +34,8 @@ def main() -> int:
         code = run_capture.main(["--enrich-dir",args.run_dir]+(["--keyframes"] if args.keyframes else [])+(["--ocr"] if args.ocr else []))
         if code == 0: write_analysis_index(Path(args.run_dir))
         return code
-    code=run_capture.main(["--url",args.url,"--output-dir",args.output_dir]+(["--keyframes"] if args.keyframes else [])+(["--ocr"] if args.ocr else []))
+    capture_args=["--url",args.url,"--output-dir",args.output_dir]+(["--keyframes"] if args.keyframes else [])+(["--ocr"] if args.ocr else [])
+    with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout): code=run_capture.main(capture_args)
     runs=sorted(Path(args.output_dir).expanduser().glob("*/content_package.json")); run=runs[-1].parent if runs else Path(args.output_dir)
     if (run/"content_package.json").is_file(): write_analysis_index(run)
     if args.json: print(json.dumps(_result(run, "completed" if code==0 else "partial")))
