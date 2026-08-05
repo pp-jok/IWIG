@@ -68,6 +68,17 @@ def atomic_write_json(path: Path, value: object) -> None:
     temporary.replace(path)
 
 
+def safe_artifact_path(run_dir: Path, relative: str) -> Path:
+    """Resolve a package path without permitting absolute, parent, or symlink escapes."""
+    candidate = Path(relative)
+    if not relative or candidate.is_absolute() or ".." in candidate.parts:
+        raise ValueError("unsafe_relative_path")
+    root, target = run_dir.resolve(), (run_dir / candidate).resolve()
+    if root not in target.parents and target != root:
+        raise ValueError("unsafe_relative_path")
+    return target
+
+
 def _schema(name: str) -> dict:
     path = Path(__file__).resolve().parents[1] / "schemas" / name
     return json.loads(path.read_text(encoding="utf-8"))

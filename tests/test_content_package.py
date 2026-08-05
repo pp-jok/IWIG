@@ -8,7 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from content_package import build_timeline, extract_keyframes, field_status, file_record, find_existing_package, hash_similarity, image_metadata, new_content_package, scene_boundaries, select_structural_keyframes, should_reuse, srt, validate_content_package, video_metadata
+from content_package import build_timeline, extract_keyframes, field_status, file_record, find_existing_package, hash_similarity, image_metadata, new_content_package, safe_artifact_path, scene_boundaries, select_structural_keyframes, should_reuse, srt, validate_content_package, video_metadata
 from build_analysis_index import build_analysis_index, validate_analysis_index, write_analysis_index
 from run_capture import process_keyframes
 
@@ -111,6 +111,10 @@ class ContentPackageTests(unittest.TestCase):
             result["media"]["video"] = {"path": "media/missing.mp4"}
             process_keyframes(result, Path(temporary), enabled=True)
             self.assertEqual(result["derived"]["keyframes"], [])
+
+    def test_safe_artifact_path_rejects_escape(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaises(ValueError): safe_artifact_path(Path(temporary), "../../secret.json")
 
 
 if __name__ == "__main__":

@@ -41,7 +41,7 @@ def _path(run: Path, record: dict | None) -> Path | None:
 def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
     video = _path(run, result["media"].get("video"))
     if not enabled or not video or not video.is_file():
-        _stage(result, "extract_keyframes", "not_run", warnings=["keyframes not requested or video unavailable"])
+        if "extract_keyframes" not in result.get("processing", {}): _stage(result, "extract_keyframes", "not_run", warnings=["keyframes not requested or video unavailable"])
         return
     existing = result.get("derived", {}).get("keyframes") or []
     if existing and all((run / item["path"]).is_file() for item in existing):
@@ -90,9 +90,12 @@ def _ocr_records(run: Path, records: list[dict]) -> list[dict]:
 def process_ocr_cover(result: dict, run: Path, enabled: bool) -> None:
     previous = result.get("processing", {}).get("ocr_cover", {})
     if enabled and result["media"].get("cover") and previous.get("status") != "completed":
-        value = _ocr_records(run, [result["media"]["cover"]])[0]
+        records = _ocr_records(run, [result["media"]["cover"]])
+        if not records:
+            _stage(result, "ocr_cover", "failed", warnings=["cover file unavailable"]); return
+        value = records[0]
         result.setdefault("ocr", {"images": [], "keyframes": []})["cover"] = value; result["derived"]["ocr"]["cover"] = value
-        _stage(result, "ocr_cover", value["status"], [value["path"]], "macOS Vision")
+        _stage(result, "ocr_cover", "completed" if value["status"] == "available" else "failed", [value["path"]], "macOS Vision")
 
 
 def process_ocr_images(result: dict, run: Path, enabled: bool) -> None:
