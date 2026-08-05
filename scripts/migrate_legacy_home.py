@@ -3,8 +3,8 @@
 from __future__ import annotations
 import argparse, os, shutil
 from pathlib import Path
-def main():
-    parser=argparse.ArgumentParser(); parser.add_argument("--dry-run", action="store_true"); args=parser.parse_args()
+def main(argv=None):
+    parser=argparse.ArgumentParser(); parser.add_argument("--dry-run", action="store_true"); args=parser.parse_args(argv)
     source=Path.home()/".xhs-url-video-capture"; target=Path(os.environ.get("IWIG_HOME", Path.home()/".iwig")); conflicts=[]; count=0
     if source.is_dir():
         for item in source.rglob("*"):
@@ -15,4 +15,5 @@ def main():
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 if item.is_file(): shutil.copy2(item,destination)
     print({"source":str(source),"destination":str(target),"dry_run":args.dry_run,"files":count,"conflicts":conflicts})
+    return 0
 if __name__=="__main__": main()

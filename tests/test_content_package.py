@@ -2,13 +2,15 @@ import hashlib
 import sys
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from content_package import build_timeline, extract_keyframes, field_status, file_record, find_existing_package, hash_similarity, image_metadata, new_content_package, scene_boundaries, select_structural_keyframes, should_reuse, srt, validate_content_package, video_metadata
-from build_analysis_index import build_analysis_index, validate_analysis_index
+from build_analysis_index import build_analysis_index, validate_analysis_index, write_analysis_index
+from run_capture import process_keyframes
 
 
 class ContentPackageTests(unittest.TestCase):
@@ -94,6 +96,21 @@ class ContentPackageTests(unittest.TestCase):
             index = build_analysis_index(run)
             self.assertEqual(validate_analysis_index(index), [])
             self.assertTrue(index["quality"]["package_valid"])
+
+    def test_analysis_index_rejects_invalid_package_and_keeps_previous_output(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary); (run / "derived").mkdir()
+            (run / "content_package.json").write_text("{}", encoding="utf-8")
+            target = run / "derived" / "analysis_index.json"; target.write_text('{"previous":true}', encoding="utf-8")
+            with self.assertRaises(ValueError): write_analysis_index(run)
+            self.assertEqual(json.loads(target.read_text()), {"previous": True})
+
+    def test_first_keyframe_stage_does_not_read_list_as_mapping(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result = new_content_package("completed", "https://example.test/n")
+            result["media"]["video"] = {"path": "media/missing.mp4"}
+            process_keyframes(result, Path(temporary), enabled=True)
+            self.assertEqual(result["derived"]["keyframes"], [])
 
 
 if __name__ == "__main__":

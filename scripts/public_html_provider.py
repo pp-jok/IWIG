@@ -353,6 +353,20 @@ def _select_video(candidates: list[dict]) -> dict | None:
     return max(candidates, key=lambda item: (item["is_origin_candidate"], (item["width"] or 0) * (item["height"] or 0), item["bitrate"] or 0), default=None)
 
 
+def public_candidate(candidate: dict) -> dict:
+    """Keep candidate provenance without persisting expiring signed URLs."""
+    url = candidate.get("url", "")
+    parsed = urlparse(url)
+    return {key: value for key, value in candidate.items() if key != "url"} | {"host": parsed.hostname, "url_sha256": "sha256:" + hashlib.sha256(url.encode("utf-8")).hexdigest()}
+
+
+def _redact_urls(value):
+    if isinstance(value, dict):
+        return {key: (public_candidate({"url": child}) if isinstance(child, str) and key.lower().startswith("url") and child.startswith(("http://", "https://")) else _redact_urls(child)) for key, child in value.items()}
+    if isinstance(value, list): return [_redact_urls(item) for item in value]
+    return value
+
+
 def _extension(content_type: str, fallback: str) -> str:
     lowered = content_type.lower().split(";", 1)[0]
     return {"image/webp": ".webp", "image/jpeg": ".jpg", "image/png": ".png", "video/mp4": ".mp4"}.get(lowered, fallback)
@@ -416,7 +430,7 @@ def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0,
         resolved_url = str(response.url)
         source = {"input_url": redact_url(url), "resolved_url": redact_url(resolved_url), "canonical_url": redact_url(resolved_url), "note_id": _note_id(resolved_url), "provider": "public_html", "captured_at": datetime.now(timezone.utc).isoformat()}
         note, selected_note_path = _current_note(state, source["note_id"])
-        (source_dir / "selected_note.json").write_text(json.dumps(note, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        (source_dir / "selected_note.json").write_text(json.dumps(_redact_urls(note), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         (source_dir / "request.json").write_text(json.dumps({"input_url": source["input_url"], "resolved_url": source["resolved_url"], "captured_at": source["captured_at"], "provider": source["provider"]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         if keep_raw_source:
             (source_dir / "page.html").write_text(html, encoding="utf-8")
@@ -425,19 +439,19 @@ def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0,
         videos = _video_candidates(note)
         covers = cover_candidates(note)
         images = image_candidates(note) if str(_first(note, "type", "noteType", "note_type") or "").lower() not in {"video", "video_note"} else []
-        (source_dir / "media_candidates.json").write_text(json.dumps({"video": videos, "cover": covers, "images": images}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        (source_dir / "media_candidates.json").write_text(json.dumps({"video": [public_candidate(item) for item in videos], "cover": [public_candidate(item) for item in covers], "images": [public_candidate(item) for item in images]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         selected_videos = sorted(videos, key=lambda item: (item["is_origin_candidate"], (item["width"] or 0) * (item["height"] or 0), item["bitrate"] or 0), reverse=True)[:2]
         for selected_video in selected_videos:
             try:
                 video_path = _stream_download(client, selected_video["url"], media_dir / "video.mp4", max_video_bytes, source["resolved_url"], "video")
-                result["media"]["video"] = {"candidate": selected_video, **file_record(video_path, output_dir), "metadata": video_metadata(video_path)}
+                result["media"]["video"] = {"candidate": public_candidate(selected_video), **file_record(video_path, output_dir), "metadata": video_metadata(video_path)}
                 break
             except PublicCaptureError as error:
                 result["errors"].append({"stage": "media_download", "code": str(error), "candidate_path": selected_video["source_path"]})
         if covers and not images:
             try:
                 cover_path = _stream_download(client, covers[0]["url"], media_dir / "cover.jpg", 20 * 1024 * 1024, source["resolved_url"], "image")
-                result["media"]["cover"] = {"candidate": covers[0], **file_record(cover_path, output_dir), **image_metadata(cover_path)}
+                result["media"]["cover"] = {"candidate": public_candidate(covers[0]), **file_record(cover_path, output_dir), **image_metadata(cover_path)}
             except PublicCaptureError as error:
                 result["errors"].append({"stage": "media_download", "code": str(error), "candidate_path": covers[0]["source_path"]})
         for image in images:
@@ -445,7 +459,7 @@ def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0,
                 images_dir = media_dir / "images"
                 images_dir.mkdir(exist_ok=True)
                 image_path = _stream_download(client, image["url"], images_dir / f"{image['index']:03}.jpg", 20 * 1024 * 1024, source["resolved_url"], "image")
-                result["media"]["images"].append({"candidate": image, **file_record(image_path, output_dir), **image_metadata(image_path)})
+                result["media"]["images"].append({"candidate": public_candidate(image), **file_record(image_path, output_dir), **image_metadata(image_path)})
             except PublicCaptureError as error:
                 result["errors"].append({"stage": "media_download", "code": str(error), "candidate_path": image["source_path"]})
         if not result["media"]["cover"] and result["media"]["images"]:
