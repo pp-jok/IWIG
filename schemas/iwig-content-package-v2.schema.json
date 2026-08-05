@@ -8,7 +8,7 @@
     "schema_version": {"const": 2}, "status": {"enum": ["completed", "partial", "failed"]},
     "identity": {"type": "object"}, "source": {"type": "object"}, "post": {"type": "object"},
     "media": {"type": "object"}, "derived": {"type": "object"}, "field_provenance": {"type": "object"},
-    "completeness": {"type": "object", "additionalProperties": {"type": "object", "required": ["status", "count", "reason"], "properties": {"status": {"enum": ["available", "zero", "not_exposed", "intentionally_omitted", "failed", "not_run"]}, "count": {"type": ["integer", "null"]}, "reason": {"type": ["string", "null"]}}}},
+    "completeness": {"type": "object", "additionalProperties": {"type": "object", "required": ["status", "count", "reason"], "properties": {"status": {"enum": ["available", "partial", "zero", "not_exposed", "intentionally_omitted", "failed", "not_run"]}, "count": {"type": ["integer", "null"]}, "reason": {"type": ["string", "null"]}}}},
     "processing": {"type": "object"}, "runtime": {"type": "object"},
     "errors": {"type": "array", "items": {"type": "object", "required": ["stage", "code"]}}, "limitations": {"type": "array", "items": {"type": "string"}}
   }

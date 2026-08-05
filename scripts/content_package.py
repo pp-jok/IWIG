@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-COMPLETENESS_STATUSES = {"available", "zero", "not_exposed", "intentionally_omitted", "failed", "not_run"}
+COMPLETENESS_STATUSES = {"available", "partial", "zero", "not_exposed", "intentionally_omitted", "failed", "not_run"}
 
 
 def field_status(value, *, reason: str | None = None, count: int | None = None) -> dict:
@@ -143,7 +143,7 @@ def find_existing_package(output_dir: Path, note_id: str | None) -> Path | None:
             package = json.loads(manifest.read_text(encoding="utf-8"))
             if package.get("source", {}).get("note_id") == note_id and package.get("status") == "completed" and not package.get("stale") and not validate_content_package(package):
                 media = package.get("media", {}); records = [item for item in [media.get("video"), media.get("cover")] if item] + media.get("images", [])
-                if all((manifest.parent / record["path"]).is_file() and file_record(manifest.parent / record["path"], manifest.parent)["sha256"] == record.get("sha256") for record in records): candidates.append((package["source"].get("captured_at") or "", manifest.parent))
+                if all(safe_artifact_path(manifest.parent, record["path"]).is_file() and file_record(safe_artifact_path(manifest.parent, record["path"]), manifest.parent)["sha256"] == record.get("sha256") for record in records): candidates.append((package["source"].get("captured_at") or "", manifest.parent))
         except (OSError, json.JSONDecodeError):
             continue
     return max(candidates, default=("", None))[1]
