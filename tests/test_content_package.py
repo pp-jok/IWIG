@@ -8,8 +8,12 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from content_package import build_timeline, extract_keyframes, field_status, file_record, find_existing_package, hash_similarity, image_metadata, new_content_package, safe_artifact_path, scene_boundaries, select_structural_keyframes, should_reuse, srt, validate_content_package, video_metadata
-from build_analysis_index import build_analysis_index, validate_analysis_index, write_analysis_index
+from content_package import (build_timeline, compute_processing_status, extract_keyframes, field_status, file_record,
+                             find_existing_package, hash_similarity, image_metadata, migrate_content_package_in_memory,
+                             new_content_package, resolve_active_error, safe_artifact_path, scene_boundaries,
+                             select_structural_keyframes, should_reuse, srt, upsert_active_error,
+                             validate_content_package, video_metadata)
+from build_analysis_index import AnalysisIndexError, build_analysis_index, validate_analysis_index, write_analysis_index
 from run_capture import process_keyframes
 
 
@@ -24,6 +28,39 @@ class ContentPackageTests(unittest.TestCase):
         for status in ("completed", "partial", "failed"):
             with self.subTest(status=status):
                 self.assertEqual(validate_content_package(new_content_package(status, "https://example.test/note")), [])
+
+    def test_legacy_v2_package_migrates_without_changing_input(self):
+        legacy = new_content_package("completed", "https://example.test/note")
+        for key in ("capture_status", "processing_status", "active_errors", "error_history"):
+            legacy.pop(key, None)
+        legacy["processing"] = {"transcribe": {"status": "failed"}}
+        migrated, notes = migrate_content_package_in_memory(legacy)
+        self.assertNotIn("capture_status", legacy)
+        self.assertEqual(migrated["capture_status"], "completed")
+        self.assertEqual(migrated["processing_status"], "failed")
+        self.assertEqual(migrated["active_errors"][0]["stage"], "transcribe")
+        self.assertIn("added:capture_status", notes)
+        self.assertEqual(validate_content_package(migrated), [])
+
+    def test_processing_status_aggregation(self):
+        self.assertEqual(compute_processing_status({}), "not_run")
+        self.assertEqual(compute_processing_status({"a": {"status": "completed"}}), "completed")
+        self.assertEqual(compute_processing_status({"a": {"status": "failed"}}), "failed")
+        self.assertEqual(compute_processing_status({"a": {"status": "completed"}, "b": {"status": "failed"}}), "partial")
+        self.assertEqual(compute_processing_status({"a": {"status": "partial"}}), "partial")
+
+    def test_active_error_is_resolved_into_history(self):
+        package = new_content_package("completed", "https://example.test/note")
+        upsert_active_error(package, stage="transcribe", code="engine_unavailable")
+        upsert_active_error(package, stage="transcribe", code="engine_unavailable")
+        resolve_active_error(package, stage="transcribe")
+        self.assertEqual(package["active_errors"], [])
+        self.assertEqual(len(package["error_history"]), 1)
+
+    def test_status_must_match_capture_status(self):
+        package = new_content_package("completed", "https://example.test/note")
+        package["capture_status"] = "failed"
+        self.assertIn("inconsistent:status_capture_status", validate_content_package(package))
 
     def test_file_record_has_size_and_hash(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -102,7 +139,7 @@ class ContentPackageTests(unittest.TestCase):
             run = Path(temporary); (run / "derived").mkdir()
             (run / "content_package.json").write_text("{}", encoding="utf-8")
             target = run / "derived" / "analysis_index.json"; target.write_text('{"previous":true}', encoding="utf-8")
-            with self.assertRaises(ValueError): write_analysis_index(run)
+            with self.assertRaises(AnalysisIndexError): write_analysis_index(run)
             self.assertEqual(json.loads(target.read_text()), {"previous": True})
 
     def test_first_keyframe_stage_does_not_read_list_as_mapping(self):

@@ -2,6 +2,6 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "IWIG Analysis Index v1",
   "type": "object",
-  "required": ["schema", "source_package", "identity", "status", "post", "text", "visual", "media", "timeline", "field_provenance", "evidence", "completeness", "quality", "analysis_readiness", "warnings", "errors"],
-  "properties": {"schema": {"type": "object", "properties": {"name": {"const": "iwig-analysis-index"}, "version": {"const": "1.0.0"}}, "required": ["name", "version"]}, "status": {"enum": ["completed", "partial", "failed"]}, "warnings": {"type": "array"}, "errors": {"type": "array"}}
+  "required": ["schema", "source_package", "identity", "status", "capture_status", "processing_status", "active_errors", "processing", "post", "text", "visual", "media", "timeline", "field_provenance", "evidence", "completeness", "quality", "analysis_readiness", "warnings", "errors"],
+  "properties": {"schema": {"type": "object", "properties": {"name": {"const": "iwig-analysis-index"}, "version": {"const": "1.0.0"}}, "required": ["name", "version"]}, "source_package": {"type": "object", "required": ["path", "file_sha256", "content_sha256"]}, "status": {"type": "object", "required": ["capture", "processing", "analysis_index"]}, "capture_status": {"enum": ["completed", "partial", "failed"]}, "processing_status": {"enum": ["not_run", "completed", "partial", "failed"]}, "active_errors": {"type": "array"}, "processing": {"type": "object"}, "warnings": {"type": "array"}, "errors": {"type": "array"}}
 }

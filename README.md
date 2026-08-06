@@ -29,6 +29,16 @@ The default local home is `~/.iwig` (override with `IWIG_HOME`).
 
 `--json` emits one machine-readable result. The content package is the stable machine interface; `report.md` is only a human-readable summary. See [data contract](docs/data-contract.md), [analysis index](docs/analysis-index.md), and [migration](docs/migration-from-xhs-url-video-capture.md).
 
+## Status semantics
+
+`status` is the compatible alias of `capture_status`: it describes only the public-page and primary-media capture. `processing_status` describes local ASR, OCR, frames, timeline, and index processing separately. A machine result can therefore be:
+
+```json
+{"capture_status":"completed","processing_status":"partial","analysis_index_status":"failed","analysis_index":null}
+```
+
+Exit code `2` means local processing is incomplete; it does not mean the collected public content is unusable. Downstream tools must consume `analysis_index` only when `analysis_index_status` is `completed`. `reindex` is local-only and never revisits the platform.
+
 ## Output and boundaries
 
 Each snapshot contains a schema-validated `content_package.json`, derived transcript/frames/OCR/timeline, and a local `derived/analysis_index.json`. Default manifests redact token-like URLs and media signatures. Raw source or sensitive candidates require explicit diagnostic flags and must not be committed.

@@ -7,11 +7,96 @@ import subprocess
 import sys
 import platform
 import tempfile
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 
 
 COMPLETENESS_STATUSES = {"available", "partial", "zero", "not_exposed", "intentionally_omitted", "failed", "not_run"}
+PROCESSING_STATUSES = {"not_run", "running", "completed", "partial", "failed"}
+
+
+def compute_processing_status(processing: dict) -> str:
+    statuses = [stage.get("status") for stage in processing.values() if isinstance(stage, dict) and stage.get("status") in PROCESSING_STATUSES - {"not_run"}]
+    if not statuses:
+        return "not_run"
+    if all(status == "completed" for status in statuses):
+        return "completed"
+    if all(status == "failed" for status in statuses):
+        return "failed"
+    if any(status in {"completed", "partial", "running"} for status in statuses):
+        return "partial"
+    return "failed"
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def upsert_active_error(package: dict, *, stage: str, code: str, detail: str | None = None) -> None:
+    error = {"stage": stage, "code": code}
+    if detail:
+        error["detail"] = detail
+    active = [item for item in package.setdefault("active_errors", []) if (item.get("stage"), item.get("code")) != (stage, code)]
+    active.append(error)
+    package["active_errors"] = active
+
+
+def resolve_active_error(package: dict, *, stage: str, code: str | None = None) -> None:
+    active, resolved = [], []
+    for error in package.setdefault("active_errors", []):
+        if error.get("stage") == stage and (code is None or error.get("code") == code):
+            resolved.append(error)
+        else:
+            active.append(error)
+    package["active_errors"] = active
+    for error in resolved:
+        record = dict(error)
+        record["resolved_at"] = _now()
+        package.setdefault("error_history", []).append(record)
+
+
+def migrate_content_package_in_memory(package: dict) -> tuple[dict, list[str]]:
+    migrated, notes = deepcopy(package), []
+    if "capture_status" not in migrated:
+        migrated["capture_status"] = migrated.get("status", "failed"); notes.append("added:capture_status")
+    migrated["status"] = migrated["capture_status"]
+    if "processing_status" not in migrated:
+        migrated["processing_status"] = compute_processing_status(migrated.get("processing") or {}); notes.append("added:processing_status")
+    if "active_errors" not in migrated:
+        migrated["active_errors"] = []; notes.append("added:active_errors")
+    if "error_history" not in migrated:
+        migrated["error_history"] = []; notes.append("added:error_history")
+    legacy_index_errors = [item for item in migrated.get("errors", []) if item.get("stage") == "analysis_index" and item.get("code") == "analysis_index_build_failed"]
+    if legacy_index_errors or "analysis_index_build_failed" in migrated.get("limitations", []):
+        stage = (migrated.get("processing") or {}).get("analysis_index", {})
+        if stage.get("status") in {"failed", "partial"}:
+            for item in legacy_index_errors or [{"stage": "analysis_index", "code": "analysis_index_build_failed"}]:
+                upsert_active_error(migrated, stage="analysis_index", code=item.get("code", "analysis_index_build_failed"), detail=item.get("detail"))
+        else:
+            migrated["error_history"].extend(legacy_index_errors)
+        notes.append("migrated:analysis_index_error")
+    for name, stage in (migrated.get("processing") or {}).items():
+        if isinstance(stage, dict) and stage.get("status") in {"failed", "partial"} and not any(item.get("stage") == name for item in migrated["active_errors"]):
+            upsert_active_error(migrated, stage=name, code=f"{name}_failed")
+    migrated["processing_status"] = compute_processing_status(migrated.get("processing") or {})
+    return migrated, notes
+
+
+def canonical_content_payload(package: dict) -> dict:
+    payload = deepcopy(package)
+    payload.pop("runtime", None)
+    payload.pop("processing_status", None)
+    payload["processing"] = dict(payload.get("processing") or {})
+    payload["processing"].pop("analysis_index", None)
+    payload["active_errors"] = [item for item in payload.get("active_errors", []) if item.get("stage") != "analysis_index"]
+    payload["error_history"] = [item for item in payload.get("error_history", []) if item.get("stage") != "analysis_index"]
+    return payload
+
+
+def content_payload_sha256(package: dict) -> str:
+    encoded = json.dumps(canonical_content_payload(package), ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 def field_status(value, *, reason: str | None = None, count: int | None = None) -> dict:
@@ -49,7 +134,7 @@ def new_content_package(status: str, input_url: str | None) -> dict:
         raise ValueError("invalid package status")
     now = datetime.now(timezone.utc).isoformat()
     return {"schema": {"name": "iwig-content-package", "version": "2.0.0"}, "schema_version": 2, "status": status,
-            "capture_status": status, "processing_status": "not_run", "active_errors": [],
+            "capture_status": status, "processing_status": "not_run", "active_errors": [], "error_history": [],
             "identity": {"platform": "xiaohongshu", "note_id": None, "author_id": None, "package_id": None, "snapshot_id": None, "snapshot_at": now, "content_fingerprint": None, "primary_media_sha256": None},
             "source": {"input_url": input_url, "resolved_url": None, "canonical_url": None,
                        "note_id": None, "provider": "public_html", "captured_at": now},
@@ -118,7 +203,7 @@ def validate_content_package_schema(package: dict) -> list[str]:
 
 
 def validate_content_package(package: dict) -> list[str]:
-    required = ("schema", "schema_version", "status", "capture_status", "processing_status", "active_errors", "identity", "source", "post", "media", "derived", "field_provenance", "processing", "errors", "limitations", "completeness", "runtime")
+    required = ("schema", "schema_version", "status", "capture_status", "processing_status", "active_errors", "error_history", "identity", "source", "post", "media", "derived", "field_provenance", "processing", "errors", "limitations", "completeness", "runtime")
     errors = [f"missing:{name}" for name in required if name not in package]
     if package.get("status") not in {"completed", "partial", "failed"}:
         errors.append("invalid:status")
@@ -128,6 +213,20 @@ def validate_content_package(package: dict) -> list[str]:
         errors.append("invalid:processing_status")
     if not isinstance(package.get("active_errors"), list):
         errors.append("invalid:active_errors")
+    if not isinstance(package.get("error_history"), list):
+        errors.append("invalid:error_history")
+    if package.get("status") != package.get("capture_status"):
+        errors.append("inconsistent:status_capture_status")
+    if package.get("processing_status") != compute_processing_status(package.get("processing") or {}):
+        errors.append("inconsistent:processing_status")
+    seen = set()
+    for error in package.get("active_errors") or []:
+        identity = (error.get("stage"), error.get("code"))
+        if identity in seen: errors.append("duplicate:active_error")
+        seen.add(identity)
+    for name, stage in (package.get("processing") or {}).items():
+        if isinstance(stage, dict) and stage.get("status") == "failed" and not any(error.get("stage") == name for error in package.get("active_errors") or []):
+            errors.append(f"missing:active_error.{name}")
     for key, value in (package.get("completeness") or {}).items():
         if not isinstance(value, dict) or value.get("status") not in COMPLETENESS_STATUSES:
             errors.append(f"invalid:completeness.{key}")
@@ -157,8 +256,8 @@ def find_existing_package(output_dir: Path, note_id: str | None) -> Path | None:
     candidates = []
     for manifest in output_dir.glob("*/content_package.json"):
         try:
-            package = json.loads(manifest.read_text(encoding="utf-8"))
-            if package.get("source", {}).get("note_id") == note_id and package.get("status") == "completed" and not package.get("stale") and not validate_content_package(package):
+            package, _ = migrate_content_package_in_memory(json.loads(manifest.read_text(encoding="utf-8")))
+            if package.get("source", {}).get("note_id") == note_id and package.get("capture_status") == "completed" and not package.get("stale") and not validate_content_package(package):
                 media = package.get("media", {}); records = [item for item in [media.get("video"), media.get("cover")] if item] + media.get("images", [])
                 primary = bool(media.get("video") or media.get("images"))
                 if primary and all(safe_artifact_path(manifest.parent, record["path"]).is_file() and file_record(safe_artifact_path(manifest.parent, record["path"]), manifest.parent)["sha256"] == record.get("sha256") for record in records): candidates.append((package["source"].get("captured_at") or "", manifest.parent))

@@ -12,3 +12,4 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - run: python -m py_compile scripts/*.py
       - run: python scripts/iwig.py --help
+      - run: python scripts/iwig.py setup --dry-run

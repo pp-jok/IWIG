@@ -9,10 +9,10 @@ from datetime import datetime, timezone
 from datetime import datetime
 from pathlib import Path
 
-from content_package import (atomic_write_json, build_timeline, completeness, extract_keyframes, field_status,
+from content_package import (atomic_write_json, atomic_write_text, build_timeline, completeness, compute_processing_status, extract_keyframes, field_status,
                              find_existing_package, new_content_package, ocr_macos,
                              ocr_macos_batch, perceptual_hash, scene_boundaries, select_structural_keyframes, should_reuse, srt,
-                             safe_artifact_path, validate_content_package)
+                             safe_artifact_path, resolve_active_error, upsert_active_error, validate_content_package, migrate_content_package_in_memory)
 from public_html_provider import PublicCaptureError, capture_public_note, note_id_from_url, redact_url
 
 
@@ -20,9 +20,12 @@ def _write_json(path: Path, value: object) -> None:
     atomic_write_json(path, value)
 
 
-def _stage(result: dict, name: str, status: str, outputs=None, tool=None, warnings=None) -> None:
+def _stage(result: dict, name: str, status: str, outputs=None, tool=None, warnings=None, code=None) -> None:
     previous = result.get("processing", {}).get(name, {})
     result.setdefault("processing", {})[name] = {"status": status, "output_paths": outputs or [], "input_sha256": previous.get("input_sha256"), "options_sha256": previous.get("options_sha256"), "tool": tool, "started_at": previous.get("started_at", datetime.now(timezone.utc).isoformat()), "completed_at": datetime.now(timezone.utc).isoformat(), "warnings": warnings or []}
+    if status in {"failed", "partial"}: upsert_active_error(result, stage=name, code=code or f"{name}_failed", detail=(warnings or [None])[0])
+    elif status == "completed": resolve_active_error(result, stage=name)
+    result["processing_status"] = compute_processing_status(result.get("processing", {}))
 
 
 def _paths_exist(run: Path, paths: list[str]) -> bool:
@@ -81,14 +84,14 @@ def process_transcript(result: dict, run: Path) -> None:
         result["derived"]["transcript"] = {"raw_path": "derived/transcript_raw_segments.json", "normalized_path": "derived/transcript_segments.json", "metadata": metadata}
         _write_json(run / "derived" / "transcript_raw_segments.json", raw)
         _write_json(run / "derived" / "transcript_segments.json", normalized)
-        (run / "derived" / "transcript.txt").write_text("\n".join(item["text"] for item in normalized) + "\n", encoding="utf-8")
-        (run / "derived" / "subtitles.srt").write_text(srt(normalized), encoding="utf-8")
+        atomic_write_text(run / "derived" / "transcript.txt", "\n".join(item["text"] for item in normalized) + "\n")
+        atomic_write_text(run / "derived" / "subtitles.srt", srt(normalized))
         _stage(result, "transcribe", "completed", ["derived/transcript_raw_segments.json", "derived/transcript_segments.json", "derived/transcript.txt", "derived/subtitles.srt"], "faster-whisper")
         result["processing"]["transcribe"]["input_sha256"] = input_hash
     except Exception as error:
         result.setdefault("errors", []).append({"stage": "transcript", "code": type(error).__name__})
         result.setdefault("limitations", []).append(f"本地口播转写失败：{type(error).__name__}")
-        _stage(result, "transcribe", "failed", tool="faster-whisper", warnings=[type(error).__name__])
+        _stage(result, "transcribe", "failed", tool="faster-whisper", warnings=[type(error).__name__], code=type(error).__name__)
 
 
 def _ocr_records(run: Path, records: list[dict]) -> list[dict]:
@@ -149,10 +152,13 @@ def process_local_stages(result: dict, run: Path, *, keyframes: bool, ocr: bool)
     process_ocr_keyframes(result, run, ocr)
     frames = result.get("derived", {}).get("keyframes", [])
     duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
-    timeline = build_timeline(result.get("transcript") or [], frames, result.get("derived", {}).get("scenes", []), duration)
-    _write_json(run / "derived" / "timeline.json", timeline)
-    result["derived"]["timeline"] = {"path": "derived/timeline.json"}
-    _stage(result, "build_timeline", "completed", ["derived/timeline.json"])
+    try:
+        timeline = build_timeline(result.get("transcript") or [], frames, result.get("derived", {}).get("scenes", []), duration)
+        _write_json(run / "derived" / "timeline.json", timeline)
+        result["derived"]["timeline"] = {"path": "derived/timeline.json"}
+        _stage(result, "build_timeline", "completed", ["derived/timeline.json"])
+    except (OSError, TypeError, ValueError) as error:
+        _stage(result, "build_timeline", "failed", warnings=[type(error).__name__], code=type(error).__name__)
     recompute_completeness(result)
     identity = result["identity"]
     source, post, video = result["source"], result["post"], result["media"].get("video")
@@ -179,7 +185,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     if args.enrich_dir:
         output = Path(args.enrich_dir).expanduser().resolve(); manifest = output / "content_package.json"
-        result = json.loads(manifest.read_text(encoding="utf-8")); process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr)
+        result, _ = migrate_content_package_in_memory(json.loads(manifest.read_text(encoding="utf-8"))); process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr)
     else:
         if not args.url: parser.error("--url is required unless --enrich-dir is used")
         root = Path(args.output_dir).expanduser().resolve(); existing = None if args.run_dir else find_existing_package(root, note_id_from_url(args.url))
@@ -191,7 +197,8 @@ def main(argv=None) -> int:
         except PublicCaptureError as error:
             result = new_content_package("failed", redact_url(args.url)); result["errors"].append({"stage": "capture", "code": str(error)}); result["limitations"].append(str(error)); recompute_completeness(result)
     result["errors"].extend({"stage": "schema", "code": item} for item in validate_content_package(result))
-    _write_json(output / "content_package.json", result); (output / "report.md").write_text(render_public_report(result), encoding="utf-8")
+    result["processing_status"] = compute_processing_status(result.get("processing", {}))
+    _write_json(output / "content_package.json", result); atomic_write_text(output / "report.md", render_public_report(result))
     print(output / "report.md"); return 0 if result["status"] != "failed" else 1
 
 

@@ -34,6 +34,8 @@ Pass `--force` to deliberately capture a fresh snapshot.
 
 Use `python scripts/iwig.py reindex <RUN_ID>` to create the strictly local `derived/analysis_index.json` projection. It is the intended no-network input for downstream breakdown and analysis Skills.
 
+`status` equals `capture_status` and reflects only public capture. Local-stage aggregation is `processing_status`; failures are listed in `active_errors` and resolved failures remain in `error_history`. Reuse is based on a valid completed capture and verified primary media, never on OCR, ASR, or index success. A missing or failed index returns `analysis_index: null`; downstream Skills must then use the content package and state the material limitation. `reindex` never requests the platform and upgrades older v2 packages in memory, persisting compatibility fields on the next write.
+
 ## Boundaries
 
 - Capture only one URL per invocation, with ordinary HTTPS and a fixed transparent User-Agent.

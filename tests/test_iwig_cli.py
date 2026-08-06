@@ -8,6 +8,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import iwig
+from build_analysis_index import AnalysisIndexError
 from content_package import atomic_write_json, new_content_package
 
 
@@ -16,7 +17,7 @@ class IwigCliTests(unittest.TestCase):
         with patch.object(sys, "argv", ["iwig", "capture", "--url", "https://example.test/n", "--max-video-mb", "10", "--timeout", "1", "--force", "--run-dir", "/tmp/run", "--keep-raw-source"]):
             def capture(argv):
                 run = Path(argv[argv.index("--run-dir") + 1]); atomic_write_json(run / "content_package.json", new_content_package("completed", "https://example.test/n")); return 0
-            with patch("iwig.run_capture.main", side_effect=capture), patch("iwig.write_analysis_index"):
+            with patch("iwig.run_capture.main", side_effect=capture):
                 self.assertEqual(iwig.main(), 0)
 
     def test_setup_does_not_forward_command_name(self):
@@ -32,17 +33,17 @@ class IwigCliTests(unittest.TestCase):
             target = run / "derived" / "analysis_index.json"
             target.parent.mkdir(parents=True)
             target.write_text('{"old": true}', encoding="utf-8")
-            with patch("iwig.write_analysis_index", side_effect=OSError("disk unavailable")):
+            with patch("iwig.write_analysis_index", side_effect=AnalysisIndexError("disk unavailable")):
                 self.assertEqual(iwig._rebuild_index_safely(run, package), "disk unavailable")
                 self.assertEqual(iwig._rebuild_index_safely(run, package), "disk unavailable")
             saved = __import__("json").loads((run / "content_package.json").read_text(encoding="utf-8"))
             self.assertEqual(saved["status"], "completed")
             self.assertEqual(saved["capture_status"], "completed")
-            self.assertEqual(saved["processing_status"], "partial")
+            self.assertEqual(saved["processing_status"], "failed")
             self.assertEqual(saved["processing"]["analysis_index"]["status"], "failed")
             self.assertEqual(len(saved["active_errors"]), 1)
             self.assertFalse(target.exists())
-            self.assertTrue((run / "derived" / "analysis_index.stale.json").is_file())
+            self.assertEqual(len(list((run / "derived").glob("analysis_index.stale.*.json"))), 1)
 
     def test_successful_reindex_clears_active_index_failure(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -52,13 +53,14 @@ class IwigCliTests(unittest.TestCase):
             package["processing"]["analysis_index"] = {"status": "failed"}
             package["active_errors"] = [{"stage": "analysis_index", "code": "analysis_index_build_failed", "detail": "old"}]
             atomic_write_json(run / "content_package.json", package)
-            with patch("iwig.write_analysis_index", return_value=run / "derived" / "analysis_index.json"):
-                self.assertIsNone(iwig._rebuild_index_safely(run, package))
+            self.assertIsNone(iwig._rebuild_index_safely(run, package))
             saved = __import__("json").loads((run / "content_package.json").read_text(encoding="utf-8"))
             self.assertEqual(saved["status"], "completed")
             self.assertEqual(saved["processing"]["analysis_index"]["status"], "completed")
             self.assertEqual(saved["processing_status"], "completed")
             self.assertEqual(saved["active_errors"], [])
+            self.assertEqual(len(saved["error_history"]), 1)
+            self.assertTrue((run / "derived" / "analysis_index.json").is_file())
 
     def test_cached_capture_does_not_recapture_when_index_rebuild_fails(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -66,6 +68,6 @@ class IwigCliTests(unittest.TestCase):
             atomic_write_json(run / "content_package.json", new_content_package("completed", "https://example.test/n"))
             with patch.object(sys, "argv", ["iwig", "capture", "--url", "https://example.test/n", "--output-dir", temporary]), \
                     patch("iwig.find_existing_package", return_value=run), \
-                    patch("iwig.write_analysis_index", side_effect=ValueError("invalid package")), \
+                    patch("iwig.write_analysis_index", side_effect=AnalysisIndexError("invalid package")), \
                     patch("iwig.run_capture.main", side_effect=AssertionError("must not recapture")):
                 self.assertEqual(iwig.main(), 2)
