@@ -61,6 +61,20 @@ class IwigCliTests(unittest.TestCase):
             self.assertEqual(saved["active_errors"], [])
             self.assertEqual(len(saved["error_history"]), 1)
             self.assertTrue((run / "derived" / "analysis_index.json").is_file())
+            index = __import__("json").loads((run / "derived" / "analysis_index.json").read_text(encoding="utf-8"))
+            self.assertEqual(index["status"], "completed")
+            self.assertEqual(index["state"]["processing"], saved["processing_status"])
+            self.assertEqual(index["processing"]["analysis_index"]["status"], "completed")
+            self.assertFalse(any(error["stage"] == "analysis_index" for error in index["active_errors"]))
+
+    def test_result_never_reports_completed_for_invalid_index(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary); package = new_content_package("completed", "https://example.test/n")
+            package["processing"]["analysis_index"] = {"status": "completed"}
+            (run / "derived").mkdir(); (run / "derived" / "analysis_index.json").write_text("{}", encoding="utf-8")
+            result = iwig._result(run, package)
+            self.assertIsNone(result["analysis_index"])
+            self.assertEqual(result["analysis_index_status"], "invalid")
 
     def test_cached_capture_does_not_recapture_when_index_rebuild_fails(self):
         with tempfile.TemporaryDirectory() as temporary:

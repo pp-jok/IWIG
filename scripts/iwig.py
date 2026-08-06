@@ -6,6 +6,7 @@ import contextlib
 import json
 import os
 import sys
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 
@@ -42,13 +43,17 @@ def _result(run: Path, package: dict) -> dict:
     index_complete = package.get("processing", {}).get("analysis_index", {}).get("status") == "completed" and index_path.is_file()
     if index_complete:
         try:
-            index_complete = not validate_analysis_index_schema(json.loads(index_path.read_text(encoding="utf-8"))) and index_complete
+            index = json.loads(index_path.read_text(encoding="utf-8"))
+            index_complete = not validate_analysis_index_schema(index) and index.get("source_package", {}).get("content_sha256") == content_payload_sha256(package)
         except (OSError, json.JSONDecodeError):
             index_complete = False
+    index_status = package.get("processing", {}).get("analysis_index", {}).get("status", "not_run")
+    if not index_complete and index_status == "completed":
+        index_status = "invalid" if index_path.is_file() else "missing"
     return {"status": package["status"], "capture_status": package.get("capture_status", package["status"]),
             "processing_status": package.get("processing_status", "not_run"), "run_dir": str(run),
             "content_package": str(run / "content_package.json"), "analysis_index": str(index_path) if index_complete else None,
-            "analysis_index_status": "completed" if index_complete else package.get("processing", {}).get("analysis_index", {}).get("status", "not_run"),
+            "analysis_index_status": "completed" if index_complete else index_status,
             "active_errors": [{key: value for key, value in item.items() if key in {"stage", "code", "detail"}} for item in package.get("active_errors", [])],
             "report": str(run / "report.md")}
 
@@ -74,15 +79,17 @@ def _set_analysis_index_success(package: dict) -> None:
 
 def _rebuild_index_safely(run: Path, package: dict) -> str | None:
     _normalize_processing_state(package)
-    package.setdefault("processing", {})["analysis_index"] = {"status": "running", "output_paths": [], "warnings": []}
-    package["processing_status"] = compute_processing_status(package.get("processing", {}))
-    _persist_processing_state(run, package)
     try:
-        write_analysis_index(run)
+        package.setdefault("processing", {})["analysis_index"] = {"status": "running", "output_paths": [], "warnings": []}
+        package["processing_status"] = compute_processing_status(package.get("processing", {}))
+        _persist_processing_state(run, package)
+        success_package = deepcopy(package)
+        _set_analysis_index_success(success_package)
+        write_analysis_index(run, package=success_package)
         target = run / "derived" / "analysis_index.json"
         index = json.loads(target.read_text(encoding="utf-8"))
         errors = validate_analysis_index_schema(index)
-        if errors or index.get("source_package", {}).get("content_sha256") != content_payload_sha256(package):
+        if errors or index.get("source_package", {}).get("content_sha256") != content_payload_sha256(success_package):
             raise AnalysisIndexError("analysis_index_postcondition_failed")
     except AnalysisIndexError as error:
         _set_analysis_index_failure(run, package, str(error))
@@ -92,8 +99,9 @@ def _rebuild_index_safely(run: Path, package: dict) -> str | None:
         _set_analysis_index_failure(run, package, str(error))
         _persist_processing_state(run, package)
         return str(error)
-    _set_analysis_index_success(package)
-    _persist_processing_state(run, package)
+    package.clear(); package.update(success_package)
+    try: _persist_processing_state(run, package)
+    except OSError as error: return f"package_state_persist_failed:{type(error).__name__}"
     return None
 
 

@@ -58,6 +58,11 @@ def resolve_active_error(package: dict, *, stage: str, code: str | None = None) 
 
 def migrate_content_package_in_memory(package: dict) -> tuple[dict, list[str]]:
     migrated, notes = deepcopy(package), []
+    legacy_errors = migrated.get("errors", [])
+    index_only = bool(legacy_errors) and all(item.get("stage") == "analysis_index" and item.get("code") == "analysis_index_build_failed" for item in legacy_errors)
+    primary_media = bool((migrated.get("media") or {}).get("video") or (migrated.get("media") or {}).get("images"))
+    if migrated.get("status") == "partial" and index_only and primary_media:
+        migrated["status"] = "completed"; notes.append("recovered:capture_status_from_legacy_index_failure")
     if "capture_status" not in migrated:
         migrated["capture_status"] = migrated.get("status", "failed"); notes.append("added:capture_status")
     migrated["status"] = migrated["capture_status"]
@@ -76,10 +81,17 @@ def migrate_content_package_in_memory(package: dict) -> tuple[dict, list[str]]:
         else:
             migrated["error_history"].extend(legacy_index_errors)
         notes.append("migrated:analysis_index_error")
+        migrated["errors"] = [item for item in migrated.get("errors", []) if item not in legacy_index_errors]
+        migrated["limitations"] = [item for item in migrated.get("limitations", []) if item != "analysis_index_build_failed"]
     for name, stage in (migrated.get("processing") or {}).items():
         if isinstance(stage, dict) and stage.get("status") in {"failed", "partial"} and not any(item.get("stage") == name for item in migrated["active_errors"]):
             upsert_active_error(migrated, stage=name, code=f"{name}_failed")
     migrated["processing_status"] = compute_processing_status(migrated.get("processing") or {})
+    unique_history, seen_history = [], set()
+    for error in migrated["error_history"]:
+        key = (error.get("stage"), error.get("code"), error.get("detail"), error.get("resolved_at"))
+        if key not in seen_history: unique_history.append(error); seen_history.add(key)
+    migrated["error_history"] = unique_history
     return migrated, notes
 
 

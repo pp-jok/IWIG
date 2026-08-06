@@ -23,10 +23,13 @@ def validate_analysis_index_schema(index: dict) -> list[str]:
 def validate_analysis_index(index: dict) -> list[str]: return validate_analysis_index_schema(index)
 
 
-def build_analysis_index(run: Path) -> dict:
+def build_analysis_index(run: Path, package: dict | None = None) -> dict:
     package_path = run / "content_package.json"
-    try: package, _ = migrate_content_package_in_memory(json.loads(package_path.read_text(encoding="utf-8")))
-    except (OSError, json.JSONDecodeError, TypeError) as error: raise AnalysisIndexError(f"content_package_unreadable:{type(error).__name__}") from error
+    if package is None:
+        try: package, _ = migrate_content_package_in_memory(json.loads(package_path.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError, TypeError) as error: raise AnalysisIndexError(f"content_package_unreadable:{type(error).__name__}") from error
+    else:
+        package, _ = migrate_content_package_in_memory(package)
     derived = package.get("derived", {}) or {}
     timeline_path = run / "derived/timeline.json"
     try: timeline = json.loads(timeline_path.read_text()) if timeline_path.is_file() else {"schema": {"name": "iwig-timeline", "version": "1.0.0"}, "events": [], "relations": []}
@@ -60,16 +63,17 @@ def build_analysis_index(run: Path) -> dict:
     unavailable = capture_status == "failed"
     readiness = {"post_copy": "unavailable" if unavailable else ("ready" if post.get("description") else "partial"), "cover": "unavailable" if unavailable or not media.get("cover") else "ready", "video_structure": "unavailable" if unavailable or not derived.get("keyframes") else "ready", "visual_text": "unavailable" if unavailable else ("partial" if processing.get("ocr_images", {}).get("status") == "partial" else ("ready" if any(record.get("text") for record in all_ocr) else "unavailable")), "transcript": "failed" if processing.get("transcribe", {}).get("status") == "failed" else ("zero" if processing.get("transcribe", {}).get("status") == "completed" and not transcript else ("ready" if transcript else "unavailable")), "comments": "unavailable", "engagement": "snapshot_only" if any(value is not None for value in post.get("metrics", {}).values()) else "unavailable"}
     package_errors = validate_content_package(package)
-    index = {"schema": {"name": "iwig-analysis-index", "version": "1.0.0"}, "source_package": {"path": "content_package.json", "file_sha256": file_record(package_path, run)["sha256"], "content_sha256": content_payload_sha256(package), "schema_version": package.get("schema", {}).get("version"), "generated_at": datetime.now(timezone.utc).isoformat()}, "identity": package.get("identity", {}), "status": {"capture": capture_status, "processing": package["processing_status"], "analysis_index": "completed"}, "capture_status": capture_status, "processing_status": package["processing_status"], "active_errors": package.get("active_errors", []), "processing": processing, "post": post, "text": {"post": post, "transcript": {"raw_segments": raw_segments, "normalized_segments": normalized_segments, "metadata": package.get("transcript_metadata", {})}}, "visual": {"cover": media.get("cover"), "images": media.get("images", []), "keyframes": derived.get("keyframes", []), "selected_keyframes": derived.get("selected_keyframes", []), "scenes": derived.get("scenes", []), "ocr": ocr}, "media": media, "timeline": timeline, "field_provenance": package.get("field_provenance", {}), "evidence": evidence, "completeness": package.get("completeness", {}), "quality": {"package_valid": not package_errors, "keyframe_count": len(derived.get("keyframes", [])), "transcript_segments": len(transcript), "error_count": len(package.get("active_errors", []))}, "analysis_readiness": readiness, "warnings": package.get("limitations", []) + package_errors, "errors": package.get("active_errors", []) + [{"stage": "package", "code": item} for item in package_errors]}
+    index = {"schema": {"name": "iwig-analysis-index", "version": "1.0.0"}, "source_package": {"path": "content_package.json", "file_sha256": file_record(package_path, run)["sha256"], "content_sha256": content_payload_sha256(package), "schema_version": package.get("schema", {}).get("version"), "generated_at": datetime.now(timezone.utc).isoformat()}, "identity": package.get("identity", {}), "status": "completed", "state": {"capture": capture_status, "processing": package["processing_status"], "analysis_index": "completed"}, "capture_status": capture_status, "processing_status": package["processing_status"], "active_errors": package.get("active_errors", []), "processing": processing, "post": post, "text": {"post": post, "transcript": {"raw_segments": raw_segments, "normalized_segments": normalized_segments, "metadata": package.get("transcript_metadata", {})}}, "visual": {"cover": media.get("cover"), "images": media.get("images", []), "keyframes": derived.get("keyframes", []), "selected_keyframes": derived.get("selected_keyframes", []), "scenes": derived.get("scenes", []), "ocr": ocr}, "media": media, "timeline": timeline, "field_provenance": package.get("field_provenance", {}), "evidence": evidence, "completeness": package.get("completeness", {}), "quality": {"package_valid": not package_errors, "keyframe_count": len(derived.get("keyframes", [])), "transcript_segments": len(transcript), "error_count": len(package.get("active_errors", []))}, "analysis_readiness": readiness, "warnings": package.get("limitations", []) + package_errors, "errors": package.get("active_errors", []) + [{"stage": "package", "code": item} for item in package_errors]}
     return index
 
 
-def write_analysis_index(run: Path) -> Path:
+def write_analysis_index(run: Path, package: dict | None = None) -> Path:
     try:
-        package, _ = migrate_content_package_in_memory(json.loads((run / "content_package.json").read_text(encoding="utf-8")))
+        if package is None: package, _ = migrate_content_package_in_memory(json.loads((run / "content_package.json").read_text(encoding="utf-8")))
+        else: package, _ = migrate_content_package_in_memory(package)
         package_errors = validate_content_package(package)
         if package_errors: raise AnalysisIndexError("content_package_invalid: " + "; ".join(package_errors))
-        target = run / "derived/analysis_index.json"; index = build_analysis_index(run); errors = validate_analysis_index_schema(index)
+        target = run / "derived/analysis_index.json"; index = build_analysis_index(run, package=package); errors = validate_analysis_index_schema(index)
         if errors: raise AnalysisIndexError("analysis_index_invalid: " + "; ".join(errors))
         atomic_write_json(target, index); return target
     except AnalysisIndexError:
