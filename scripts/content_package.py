@@ -49,6 +49,7 @@ def new_content_package(status: str, input_url: str | None) -> dict:
         raise ValueError("invalid package status")
     now = datetime.now(timezone.utc).isoformat()
     return {"schema": {"name": "iwig-content-package", "version": "2.0.0"}, "schema_version": 2, "status": status,
+            "capture_status": status, "processing_status": "not_run", "active_errors": [],
             "identity": {"platform": "xiaohongshu", "note_id": None, "author_id": None, "package_id": None, "snapshot_id": None, "snapshot_at": now, "content_fingerprint": None, "primary_media_sha256": None},
             "source": {"input_url": input_url, "resolved_url": None, "canonical_url": None,
                        "note_id": None, "provider": "public_html", "captured_at": now},
@@ -64,6 +65,14 @@ def atomic_write_json(path: Path, value: object) -> None:
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as target:
         json.dump(value, target, ensure_ascii=False, indent=2)
         target.write("\n")
+        temporary = Path(target.name)
+    temporary.replace(path)
+
+
+def atomic_write_text(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, delete=False) as target:
+        target.write(value)
         temporary = Path(target.name)
     temporary.replace(path)
 
@@ -109,10 +118,16 @@ def validate_content_package_schema(package: dict) -> list[str]:
 
 
 def validate_content_package(package: dict) -> list[str]:
-    required = ("schema", "schema_version", "status", "identity", "source", "post", "media", "derived", "field_provenance", "processing", "errors", "limitations", "completeness", "runtime")
+    required = ("schema", "schema_version", "status", "capture_status", "processing_status", "active_errors", "identity", "source", "post", "media", "derived", "field_provenance", "processing", "errors", "limitations", "completeness", "runtime")
     errors = [f"missing:{name}" for name in required if name not in package]
     if package.get("status") not in {"completed", "partial", "failed"}:
         errors.append("invalid:status")
+    if package.get("capture_status") not in {"completed", "partial", "failed"}:
+        errors.append("invalid:capture_status")
+    if package.get("processing_status") not in {"not_run", "completed", "partial", "failed"}:
+        errors.append("invalid:processing_status")
+    if not isinstance(package.get("active_errors"), list):
+        errors.append("invalid:active_errors")
     for key, value in (package.get("completeness") or {}).items():
         if not isinstance(value, dict) or value.get("status") not in COMPLETENESS_STATUSES:
             errors.append(f"invalid:completeness.{key}")

@@ -164,9 +164,10 @@ def process_local_stages(result: dict, run: Path, *, keyframes: bool, ocr: bool)
 def render_public_report(result: dict) -> str:
     post, media, source = result["post"], result["media"], result["source"]
     value = lambda item: "未获取" if item is None else item
-    lines = ["# 小红书公开内容包", "", "## 帖子信息", "", f"- 链接：{value(source.get('canonical_url') or source.get('resolved_url'))}", f"- 帖子 ID：{value(source.get('note_id'))}", f"- 标题：{value(post.get('title'))}", f"- 作者：{value(post['author'].get('nickname'))}", f"- 点赞：{value(post['metrics'].get('likes'))}", f"- 收藏：{value(post['metrics'].get('favorites'))}", f"- 评论数：{value(post['metrics'].get('comments'))}", "", "## 正文", "", post.get("description") or "未获取", "", "## 媒体", "", f"- 视频：{media.get('video', {}).get('path') if media.get('video') else '未获取'}", f"- 封面：{media.get('cover', {}).get('path') if media.get('cover') else '未获取'}", f"- 图文页：{len(media.get('images') or [])}", "", "## 评论", "", "- 本 Skill 只读取公开 HTML，不采集评论详情或二级回复。", "", "## 获取完整度", ""]
+    lines = ["# 小红书公开内容包", "", "## 帖子信息", "", f"- 链接：{value(source.get('canonical_url') or source.get('resolved_url'))}", f"- 帖子 ID：{value(source.get('note_id'))}", f"- 标题：{value(post.get('title'))}", f"- 作者：{value(post['author'].get('nickname'))}", f"- 点赞：{value(post['metrics'].get('likes'))}", f"- 收藏：{value(post['metrics'].get('favorites'))}", f"- 评论数：{value(post['metrics'].get('comments'))}", "", "## 正文", "", post.get("description") or "未获取", "", "## 媒体", "", f"- 视频：{media.get('video', {}).get('path') if media.get('video') else '未获取'}", f"- 封面：{media.get('cover', {}).get('path') if media.get('cover') else '未获取'}", f"- 图文页：{len(media.get('images') or [])}", "", "## 处理状态", "", f"- 采集：{result.get('capture_status', result.get('status'))}", f"- 本地处理：{result.get('processing_status', 'not_run')}", f"- 分析索引：{result.get('processing', {}).get('analysis_index', {}).get('status', 'not_run')}", "", "## 评论", "", "- 本 Skill 只读取公开 HTML，不采集评论详情或二级回复。", "", "## 获取完整度", ""]
     lines += [f"- {key}：{item.get('status') if isinstance(item, dict) else item}" for key, item in result.get("completeness", {}).items()]
-    return "\n".join(lines + ["", "## 限制", "", *[f"- {item}" for item in result.get("limitations") or []], ""])
+    active_errors = result.get("active_errors") or []
+    return "\n".join(lines + ["", "## 限制", "", *[f"- {item}" for item in result.get("limitations") or []], "", "## 当前处理问题", "", *[f"- {item.get('stage')}：{item.get('code')}" for item in active_errors], ""])
 
 
 def main(argv=None) -> int:

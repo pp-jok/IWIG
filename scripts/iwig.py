@@ -10,26 +10,84 @@ from datetime import datetime
 from pathlib import Path
 
 from build_analysis_index import validate_analysis_index_schema, write_analysis_index
-from content_package import atomic_write_json, file_record, find_existing_package, safe_artifact_path, validate_content_package
+from content_package import atomic_write_json, atomic_write_text, file_record, find_existing_package, safe_artifact_path, validate_content_package
 import run_capture
 from public_html_provider import note_id_from_url
 
 HOME = Path(os.environ.get("IWIG_HOME", Path.home() / ".iwig"))
 
 
+def _normalize_processing_state(package: dict) -> None:
+    package.setdefault("capture_status", package.get("status", "failed"))
+    package.setdefault("active_errors", [])
+    package.setdefault("processing_status", _processing_status(package))
+
+
+def _exit_code(package: dict) -> int:
+    if package.get("capture_status", package.get("status")) == "failed" or package.get("status") == "failed":
+        return 3
+    if package.get("processing_status") in {"partial", "failed"} or package.get("status") == "partial":
+        return 2
+    return 0
+
+
+def _persist_processing_state(run: Path, package: dict) -> None:
+    atomic_write_json(run / "content_package.json", package)
+    atomic_write_text(run / "report.md", run_capture.render_public_report(package))
+
+
 def _result(run: Path, package: dict) -> dict:
-    return {"status": package["status"], "run_dir": str(run), "content_package": str(run / "content_package.json"), "analysis_index": str(run / "derived" / "analysis_index.json"), "report": str(run / "report.md")}
+    index_path = run / "derived" / "analysis_index.json"
+    index_complete = package.get("processing", {}).get("analysis_index", {}).get("status") == "completed" and index_path.is_file()
+    return {"status": package["status"], "capture_status": package.get("capture_status", package["status"]),
+            "processing_status": package.get("processing_status", "not_run"), "run_dir": str(run),
+            "content_package": str(run / "content_package.json"), "analysis_index": str(index_path) if index_complete else None,
+            "analysis_index_status": "completed" if index_complete else package.get("processing", {}).get("analysis_index", {}).get("status", "not_run"),
+            "report": str(run / "report.md")}
+
+
+def _processing_status(package: dict) -> str:
+    statuses = [stage.get("status") for stage in package.get("processing", {}).values() if isinstance(stage, dict)]
+    if any(status == "failed" for status in statuses):
+        return "partial"
+    if any(status == "partial" for status in statuses):
+        return "partial"
+    if any(status == "completed" for status in statuses):
+        return "completed"
+    return "not_run"
+
+
+def _set_analysis_index_failure(run: Path, package: dict, detail: str) -> None:
+    target = run / "derived" / "analysis_index.json"
+    stale = run / "derived" / "analysis_index.stale.json"
+    if target.is_file():
+        try:
+            target.replace(stale)
+        except OSError:
+            pass
+    package.setdefault("processing", {})["analysis_index"] = {"status": "failed", "output_paths": [], "warnings": [detail]}
+    entry = {"stage": "analysis_index", "code": "analysis_index_build_failed", "detail": detail}
+    package["active_errors"] = [item for item in package.get("active_errors", []) if item.get("stage") != "analysis_index"] + [entry]
+    package["processing_status"] = _processing_status(package)
+
+
+def _set_analysis_index_success(package: dict) -> None:
+    package.setdefault("processing", {})["analysis_index"] = {"status": "completed", "output_paths": ["derived/analysis_index.json"], "warnings": []}
+    package["active_errors"] = [item for item in package.get("active_errors", []) if item.get("stage") != "analysis_index"]
+    package["processing_status"] = _processing_status(package)
 
 
 def _rebuild_index_safely(run: Path, package: dict) -> str | None:
+    _normalize_processing_state(package)
+    _set_analysis_index_success(package)
+    _persist_processing_state(run, package)
     try:
-        write_analysis_index(run); return None
-    except ValueError as error:
-        package["status"] = "partial"
-        package.setdefault("errors", []).append({"stage": "analysis_index", "code": "analysis_index_build_failed", "detail": str(error)})
-        package.setdefault("limitations", []).append("analysis_index_build_failed")
-        atomic_write_json(run / "content_package.json", package)
+        write_analysis_index(run)
+    except (ValueError, OSError, json.JSONDecodeError, KeyError, TypeError) as error:
+        _set_analysis_index_failure(run, package, str(error))
+        _persist_processing_state(run, package)
         return str(error)
+    return None
 
 
 def validate(run: Path) -> dict:
@@ -89,33 +147,43 @@ def main() -> int:
     if args.command == "validate":
         outcome = validate(Path(args.run_dir)); print(json.dumps(outcome)); return 0 if outcome["valid"] else 5
     if args.command == "reindex":
-        try: print(write_analysis_index(Path(args.run_dir))); return 0
-        except ValueError as error: print(str(error), file=sys.stderr); return 5
+        run = Path(args.run_dir).expanduser().resolve()
+        try:
+            package = json.loads((run / "content_package.json").read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as error:
+            print(str(error), file=sys.stderr); return 5
+        error = _rebuild_index_safely(run, package)
+        if error:
+            print(error, file=sys.stderr); return 5
+        print(run / "derived" / "analysis_index.json")
+        return 0
     if args.command == "enrich":
         code = run_capture.main(["--enrich-dir", args.run_dir] + (["--keyframes"] if args.keyframes else []) + (["--ocr"] if args.ocr else []))
         run = Path(args.run_dir).expanduser().resolve()
         if (run / "content_package.json").is_file():
             package = json.loads((run / "content_package.json").read_text(encoding="utf-8"))
-            return 2 if _rebuild_index_safely(run, package) else code
+            _rebuild_index_safely(run, package)
+            package = json.loads((run / "content_package.json").read_text(encoding="utf-8"))
+            return max(code, _exit_code(package))
         return code
     root = Path(args.output_dir).expanduser().resolve()
     existing = None if args.run_dir or args.force else find_existing_package(root, note_id_from_url(args.url))
     if existing:
         package = json.loads((existing / "content_package.json").read_text(encoding="utf-8"))
         index_path = existing / "derived" / "analysis_index.json"
-        needs_index = not index_path.is_file()
+        needs_index = package.get("processing", {}).get("analysis_index", {}).get("status") != "completed" or not index_path.is_file()
         if not needs_index:
             try:
                 index = json.loads(index_path.read_text(encoding="utf-8"))
                 needs_index = bool(validate_analysis_index_schema(index)) or index.get("source_package", {}).get("sha256") != file_record(existing / "content_package.json", existing)["sha256"]
             except (OSError, json.JSONDecodeError): needs_index = True
-        if needs_index and _rebuild_index_safely(existing, package):
-            existing = None
+        if needs_index:
+            _rebuild_index_safely(existing, package)
         if existing:
             package = json.loads((existing / "content_package.json").read_text(encoding="utf-8"))
             if args.json: print(json.dumps(_result(existing, package), ensure_ascii=False))
             else: print(existing / "report.md")
-            return {"completed": 0, "partial": 2, "failed": 3}[package["status"]]
+            return _exit_code(package)
     run = _capture_run_dir(args); run.mkdir(parents=True, exist_ok=True)
     manifest = run / "content_package.json"
     if args.run_dir and any(run.iterdir()):
@@ -134,7 +202,7 @@ def main() -> int:
     package = json.loads((run / "content_package.json").read_text(encoding="utf-8")); _rebuild_index_safely(run, package)
     package = json.loads((run / "content_package.json").read_text(encoding="utf-8"))
     if args.json: print(json.dumps(_result(run, package), ensure_ascii=False))
-    return {"completed": 0, "partial": 2, "failed": 3}.get(package["status"], 6)
+    return _exit_code(package)
 
 
 if __name__ == "__main__": raise SystemExit(main())
