@@ -180,6 +180,25 @@ class ContentPackageTests(unittest.TestCase):
         self.assertEqual(items[0]["evidence_refs"], ["evidence-001"])
         self.assertEqual(items[0]["method"], "rule_based_v1")
 
+    def test_visual_candidates_explain_scene_and_subtitle_changes(self):
+        from content_package import build_visual_candidates
+        candidates = build_visual_candidates([
+            {"id": "frame-001", "time_seconds": 0, "adjacent_similarity": None, "ocr": {"text": "开场"}},
+            {"id": "frame-002", "time_seconds": 30, "adjacent_similarity": .31, "ocr": {"text": "第二个方法"}},
+        ], 30)
+        self.assertEqual(candidates[0]["selection_bases"], ["start", "subtitle_change"])
+        self.assertIn("scene_change", candidates[1]["selection_bases"])
+        self.assertIn("end", candidates[1]["selection_bases"])
+
+    def test_visual_description_is_conservative_and_traceable(self):
+        from content_package import describe_visual_records
+        descriptions = describe_visual_records([
+            {"id": "candidate-frame-001", "ocr_text": "这是画面中很长很长的一段文字，足以构成文字卡片"},
+            {"id": "candidate-frame-002", "ocr_text": "字幕"},
+        ])
+        self.assertEqual([item["label"] for item in descriptions], ["text_card", "subtitle_overlay"])
+        self.assertTrue(all(item["kind"] == "inference" and item["evidence_refs"] for item in descriptions))
+
     def test_timeline_attaches_frame_to_overlapping_speech(self):
         timeline = build_timeline([{"start": 0, "end": 5, "text": "开头"}], [{"id": "frame-001", "path": "001.jpg", "time_seconds": 2, "ocr": {"text": "标题"}}])
         self.assertEqual({item["type"] for item in timeline["events"]}, {"speech", "frame", "ocr"})

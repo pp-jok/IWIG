@@ -507,8 +507,8 @@ def build_visual_candidates(frames: list[dict], duration_seconds: float | None) 
         if at / duration >= .90: bases.append("end")
         if frame.get("adjacent_similarity") is not None and frame["adjacent_similarity"] < .72: bases.append("scene_change")
         text = (frame.get("ocr") or {}).get("filtered_text") or (frame.get("ocr") or {}).get("text", "")
-        if text and text != previous: bases.append("ocr_novelty")
-        if bases: output.append({"id": f"candidate-{frame['id']}", "kind": "fact", "frame_ref": frame["id"], "time_seconds": at, "selection_bases": bases})
+        if text and text != previous: bases.append("subtitle_change")
+        if bases: output.append({"id": f"candidate-{frame['id']}", "kind": "fact", "frame_ref": frame["id"], "time_seconds": at, "selection_bases": bases, "ocr_text": text, "selection_score": len(bases)})
         previous = text
     return output
 
@@ -517,7 +517,7 @@ def describe_visual_records(records: list[dict]) -> list[dict]:
     output = []
     for record in records:
         text = (record.get("ocr_text") or record.get("text") or "").lower()
-        label = "text_card" if len(text) >= 12 else "unknown"
+        label = "text_card" if len(text) >= 12 else ("subtitle_overlay" if text else "unknown")
         output.append({"id": f"visual-{record['id']}", "kind": "inference", "label": label,
                        "confidence": .60 if label != "unknown" else .0, "method": "ocr_density_v1",
                        "evidence_refs": [record["id"]]})
