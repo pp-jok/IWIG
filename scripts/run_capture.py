@@ -61,15 +61,22 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
             result["derived"]["scenes"] = scene_boundaries(result["derived"]["frame_scan"])
             duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
             result["derived"]["representative_frame_plan"] = select_representative_frames(result["derived"]["frame_scan"], duration) if scan.get("status") == "available" else []
+        events = [{"scan_ref": item["id"], "time_seconds": item["time_seconds"], "adjacent_similarity": item.get("adjacent_similarity"), "selection_basis": "dense_scan_perceptual_hash", "threshold": .72} for item in result["derived"].get("frame_scan", []) if item.get("adjacent_similarity") is not None and item["adjacent_similarity"] < .72]
+        result["derived"]["scene_change_events"] = events
+        result["derived"]["scene_change_keyframes"] = events  # legacy alias
         for scene in result["derived"].get("scenes", []):
             candidate = min(existing, key=lambda frame: abs(frame["time_seconds"] - scene["start_seconds"]), default=None)
             scene["representative_frame_ref"] = candidate.get("id") if candidate else None
+        for event in result["derived"].get("scene_change_events", []):
+            candidate = min(existing, key=lambda frame: abs(frame["time_seconds"] - event["time_seconds"]), default=None)
+            event["frame_ref"] = candidate.get("id") if candidate else None
         _stage(result, "extract_keyframes", "completed", [item["path"] for item in existing], "PyAV", ["reused existing frames"])
         return
     scan = scan_video_frames(video)
     result["derived"]["frame_scan"] = scan.get("frames", [])
     result["derived"]["scenes"] = scene_boundaries(result["derived"]["frame_scan"])
-    result["derived"]["scene_change_keyframes"] = [{"scan_ref": item["id"], "time_seconds": item["time_seconds"], "adjacent_similarity": item.get("adjacent_similarity"), "selection_basis": "dense_scan_perceptual_hash", "threshold": .72} for item in result["derived"]["frame_scan"] if item.get("adjacent_similarity") is not None and item["adjacent_similarity"] < .72]
+    result["derived"]["scene_change_events"] = [{"scan_ref": item["id"], "time_seconds": item["time_seconds"], "adjacent_similarity": item.get("adjacent_similarity"), "selection_basis": "dense_scan_perceptual_hash", "threshold": .72} for item in result["derived"]["frame_scan"] if item.get("adjacent_similarity") is not None and item["adjacent_similarity"] < .72]
+    result["derived"]["scene_change_keyframes"] = result["derived"]["scene_change_events"]
     duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
     result["derived"]["representative_frame_plan"] = select_representative_frames(scan.get("frames", []), duration) if scan.get("status") == "available" else []
     extracted = extract_keyframes(video, run / "derived" / "keyframes",
