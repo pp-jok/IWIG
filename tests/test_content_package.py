@@ -116,6 +116,12 @@ class ContentPackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             self.assertEqual(extract_keyframes(Path("missing.mp4"), Path(temporary))["status"], "failed")
 
+    def test_adaptive_keyframe_interval_increases_short_video_coverage(self):
+        from content_package import adaptive_keyframe_interval
+        self.assertEqual(adaptive_keyframe_interval(44.5), 4.0)
+        self.assertEqual(adaptive_keyframe_interval(300), 27.3)
+        self.assertEqual(adaptive_keyframe_interval(None), 30.0)
+
     def test_structural_selection_prefers_hook_and_text_rich_change(self):
         frames = [{"id": "frame-001", "path": "001.jpg", "time_seconds": 2, "ocr": {"text": "开头承诺"}}, {"id": "frame-002", "path": "002.jpg", "time_seconds": 30, "ocr": {"text": ""}}, {"id": "frame-003", "path": "003.jpg", "time_seconds": 60, "ocr": {"text": "第一步 方法 清单"}}]
         selected = select_structural_keyframes(frames, duration_seconds=90, limit=2)

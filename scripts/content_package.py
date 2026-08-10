@@ -372,6 +372,13 @@ def video_metadata(path: Path) -> dict:
         return {"status": "failed", "reason": type(error).__name__, **optional}
 
 
+def adaptive_keyframe_interval(duration_seconds: float | None, default_interval: int = 30, max_frames: int = 12, minimum_interval: int = 3) -> float:
+    """Use denser coverage for short clips while bounding all local work."""
+    if not duration_seconds or duration_seconds <= 0:
+        return float(default_interval)
+    return round(min(float(default_interval), max(float(minimum_interval), duration_seconds / max(max_frames - 1, 1))), 1)
+
+
 def extract_keyframes(path: Path, destination: Path, interval_seconds: int = 30, max_frames: int = 12) -> dict:
     try:
         import av
@@ -379,6 +386,8 @@ def extract_keyframes(path: Path, destination: Path, interval_seconds: int = 30,
         saved, next_second = [], 0.0
         with av.open(str(path)) as container:
             stream = next(item for item in container.streams if item.type == "video")
+            duration = float(stream.duration * stream.time_base) if stream.duration is not None else None
+            interval_seconds = adaptive_keyframe_interval(duration, interval_seconds, max_frames)
             for frame in container.decode(stream):
                 seconds = float(frame.time or 0)
                 if seconds < next_second:
