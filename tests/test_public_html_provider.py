@@ -57,6 +57,11 @@ class CoverCandidateTests(unittest.TestCase):
 
 
 class PublicReportTests(unittest.TestCase):
+    def test_capture_archives_public_html_and_initial_state_by_default(self):
+        source = (ROOT / "scripts" / "public_html_provider.py").read_text(encoding="utf-8")
+        self.assertIn('(source_dir / "page.html").write_text(html, encoding="utf-8")', source)
+        self.assertIn('(source_dir / "initial_state.json").write_text(', source)
+
     def test_successful_capture_syncs_capture_status(self):
         class Response:
             status_code = 200

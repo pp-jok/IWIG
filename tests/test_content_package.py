@@ -255,6 +255,14 @@ class ContentPackageTests(unittest.TestCase):
         recompute_completeness(package)
         self.assertEqual(package["completeness"]["transcript"]["status"], "zero")
 
+    def test_capture_manifest_is_written_before_local_processing(self):
+        import run_capture
+        with tempfile.TemporaryDirectory() as temporary:
+            package = new_content_package("completed", "https://example.test/n")
+            with patch("run_capture.capture_public_note", return_value=package), \
+                 patch("run_capture.process_local_stages", side_effect=lambda _p, run, **_k: self.assertTrue((run / "content_package.json").is_file())):
+                self.assertEqual(run_capture.main(["--url", "https://example.test/n", "--run-dir", temporary]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -457,9 +457,9 @@ def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0,
         note, selected_note_path = _current_note(state, source["note_id"])
         (source_dir / "selected_note.json").write_text(json.dumps(_redact_urls(note), ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         (source_dir / "request.json").write_text(json.dumps({"input_url": source["input_url"], "resolved_url": source["resolved_url"], "captured_at": source["captured_at"], "provider": source["provider"]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        if keep_raw_source:
-            (source_dir / "page.html").write_text(html, encoding="utf-8")
-            (source_dir / "initial_state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+        # Public source evidence enables local reprocessing without another platform request.
+        (source_dir / "page.html").write_text(html, encoding="utf-8")
+        (source_dir / "initial_state.json").write_text(json.dumps(state, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
         result = _normalize(note, source, selected_note_path)
         videos = _video_candidates(note)
         covers = cover_candidates(note)

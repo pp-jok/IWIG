@@ -224,6 +224,9 @@ def main(argv=None) -> int:
         output = Path(args.run_dir).expanduser().resolve() if args.run_dir else root / datetime.now().strftime("%Y%m%d-%H%M%S"); output.mkdir(parents=True, exist_ok=True)
         try:
             result = capture_public_note(args.url, output, args.timeout, args.max_video_mb * 1024 * 1024, args.keep_raw_source)
+            # Checkpoint capture before CPU-bound local stages so interruption is recoverable.
+            _write_json(output / "content_package.json", result)
+            atomic_write_text(output / "report.md", render_public_report(result))
             process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr, interpret=args.interpret)
         except PublicCaptureError as error:
             result = new_content_package("failed", redact_url(args.url)); result["errors"].append({"stage": "capture", "code": str(error)}); result["limitations"].append(str(error)); recompute_completeness(result)
