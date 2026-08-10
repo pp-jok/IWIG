@@ -268,6 +268,14 @@ class ContentPackageTests(unittest.TestCase):
         self.assertEqual(index["interpretations"][0]["kind"], "inference")
         self.assertEqual(index["analysis_readiness"]["evidence"], "ready")
 
+    def test_analysis_index_reports_unresolved_evidence_reference(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary); package = new_content_package("completed", "https://example.test/note")
+            package["derived"]["evidence_segments"] = [{"id": "evidence-001", "frame_refs": ["frame-missing"]}]
+            (run / "content_package.json").write_text(json.dumps(package), encoding="utf-8")
+            index = build_analysis_index(run)
+        self.assertIn("unresolved_evidence_ref:evidence-001:frame_refs:frame-missing", index["warnings"])
+
     def test_analysis_index_rejects_invalid_package_and_keeps_previous_output(self):
         with tempfile.TemporaryDirectory() as temporary:
             run = Path(temporary); (run / "derived").mkdir()
