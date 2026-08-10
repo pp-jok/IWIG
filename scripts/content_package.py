@@ -397,6 +397,54 @@ def adaptive_keyframe_interval(duration_seconds: float | None, default_interval:
     return round(min(float(default_interval), max(float(minimum_interval), duration_seconds / max(max_frames - 1, 1))), 1)
 
 
+def scan_video_frames(path: Path, cadence_seconds: float = 1.0, max_samples: int = 180) -> dict:
+    """Read bounded, low-cost visual signatures without retaining scan images."""
+    try:
+        import av
+        from PIL import Image
+        samples, next_second = [], 0.0
+        with av.open(str(path)) as container:
+            stream = next(item for item in container.streams if item.type == "video")
+            for frame in container.decode(stream):
+                at = float(frame.time or 0)
+                if at < next_second:
+                    continue
+                image = frame.to_image().convert("L").resize((9, 8))
+                pixels = image.load()
+                bits = "".join("1" if pixels[x, y] > pixels[x + 1, y] else "0" for y in range(8) for x in range(8))
+                samples.append({"id": f"scan-{len(samples) + 1:03}", "time_seconds": at, "perceptual_hash": f"{int(bits, 2):016x}"})
+                next_second = at + cadence_seconds
+                if len(samples) >= max_samples:
+                    break
+        scene_boundaries(samples)
+        return {"status": "available", "frames": samples}
+    except Exception as error:
+        return {"status": "failed", "reason": type(error).__name__, "frames": []}
+
+
+def select_representative_frames(scan: list[dict], duration_seconds: float | None, limit: int = 12) -> list[dict]:
+    """Select bounded evidence from scan metadata, never from semantic labels."""
+    if not scan or limit <= 0:
+        return []
+    if any("adjacent_similarity" not in frame for frame in scan):
+        scene_boundaries(scan)
+    duration = max(duration_seconds or scan[-1].get("time_seconds", 0), 1)
+    candidates = []
+    for index, frame in enumerate(scan):
+        bases = []
+        if index == 0: bases.append("start")
+        if index == len(scan) - 1: bases.append("end")
+        if frame.get("adjacent_similarity") is not None and frame["adjacent_similarity"] < .72: bases.append("scene_boundary")
+        if bases:
+            candidates.append({"scan_ref": frame["id"], "time_seconds": frame["time_seconds"], "selection_bases": bases,
+                               "selection_score": len(bases) + (2 if "scene_boundary" in bases else 0)})
+    if not candidates:
+        candidates.append({"scan_ref": scan[0]["id"], "time_seconds": scan[0]["time_seconds"], "selection_bases": ["start"], "selection_score": 1})
+    candidates.sort(key=lambda item: (-item["selection_score"], item["time_seconds"]))
+    selected = candidates[:limit]
+    return sorted(selected, key=lambda item: item["time_seconds"])
+
+
 def extract_keyframes(path: Path, destination: Path, interval_seconds: int = 30, max_frames: int = 12) -> dict:
     try:
         import av

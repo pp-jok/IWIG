@@ -122,6 +122,18 @@ class ContentPackageTests(unittest.TestCase):
         self.assertEqual(adaptive_keyframe_interval(300), 27.3)
         self.assertEqual(adaptive_keyframe_interval(None), 30.0)
 
+    def test_representative_selection_is_independent_of_scan_density(self):
+        from content_package import select_representative_frames
+        scan = [
+            {"id": "scan-001", "time_seconds": 0, "perceptual_hash": "0" * 16},
+            {"id": "scan-002", "time_seconds": 1, "perceptual_hash": "0" * 16},
+            {"id": "scan-003", "time_seconds": 2, "perceptual_hash": "f" * 16},
+            {"id": "scan-004", "time_seconds": 3, "perceptual_hash": "f" * 16},
+        ]
+        selected = select_representative_frames(scan, duration_seconds=3, limit=2)
+        self.assertEqual(len(selected), 2)
+        self.assertTrue(any("scene_boundary" in item["selection_bases"] for item in selected))
+
     def test_structural_selection_prefers_hook_and_text_rich_change(self):
         frames = [{"id": "frame-001", "path": "001.jpg", "time_seconds": 2, "ocr": {"text": "开头承诺"}}, {"id": "frame-002", "path": "002.jpg", "time_seconds": 30, "ocr": {"text": ""}}, {"id": "frame-003", "path": "003.jpg", "time_seconds": 60, "ocr": {"text": "第一步 方法 清单"}}]
         selected = select_structural_keyframes(frames, duration_seconds=90, limit=2)
