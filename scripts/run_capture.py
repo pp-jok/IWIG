@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from datetime import datetime
 from pathlib import Path
 
-from content_package import (atomic_write_json, atomic_write_text, build_evidence_segments, build_image_page_evidence, build_timeline, build_visual_candidates, completeness, compute_processing_status, describe_visual_records, extract_keyframes, field_status, file_record,
+from content_package import (atomic_write_json, atomic_write_text, build_evidence_segments, build_image_page_evidence, build_text_change_events, build_timeline, build_visual_candidates, completeness, compute_processing_status, describe_visual_records, extract_keyframes, field_status, file_record,
                              find_existing_package, new_content_package, ocr_macos,
                              ocr_macos_batch, perceptual_hash, rule_based_interpretations, scene_boundaries, select_scene_change_frames, select_structural_keyframes, should_reuse, srt,
                              safe_artifact_path, resolve_active_error, upsert_active_error, validate_content_package, migrate_content_package_in_memory)
@@ -161,10 +161,15 @@ def process_evidence(result: dict, run: Path, enabled: bool, describe_visuals: b
         _stage(result, "build_image_page_evidence", "completed", ["derived/image_pages.json"], "local factual linker")
     candidates = build_visual_candidates(derived.get("keyframes", []), (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds"))
     derived["visual_candidates"] = candidates
+    text_events = build_text_change_events(derived.get("keyframes", []))
+    derived["text_change_events"] = text_events
+    if text_events:
+        _write_json(run / "derived" / "text_change_events.json", text_events)
+        _stage(result, "build_text_change_events", "completed", ["derived/text_change_events.json"], "local factual linker")
     transcript = result.get("transcript") or []
     segments = []
-    if transcript:
-        segments = build_evidence_segments(transcript, derived.get("keyframes", []), derived["scene_change_keyframes"], derived.get("ocr", {}))
+    if transcript or text_events or derived["scene_change_keyframes"]:
+        segments = build_evidence_segments(transcript, derived.get("keyframes", []), derived["scene_change_keyframes"], derived.get("ocr", {}), text_events)
         derived["evidence_segments"] = segments
         _write_json(run / "derived" / "evidence_segments.json", segments)
         _stage(result, "build_evidence_segments", "completed", ["derived/evidence_segments.json"], "local factual linker")
@@ -200,7 +205,7 @@ def process_local_stages(result: dict, run: Path, *, keyframes: bool, ocr: bool,
     frames = result.get("derived", {}).get("keyframes", [])
     duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
     try:
-        timeline = build_timeline(result.get("transcript") or [], frames, result.get("derived", {}).get("scenes", []), duration)
+        timeline = build_timeline(result.get("transcript") or [], frames, result.get("derived", {}).get("scenes", []), duration, result.get("derived", {}).get("text_change_events", []))
         _write_json(run / "derived" / "timeline.json", timeline)
         result["derived"]["timeline"] = {"path": "derived/timeline.json"}
         _stage(result, "build_timeline", "completed", ["derived/timeline.json"])

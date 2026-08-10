@@ -209,6 +209,18 @@ class ContentPackageTests(unittest.TestCase):
         timeline = build_timeline([{"start": 0, "end": 5, "text": "开头"}], [{"id": "frame-001", "path": "001.jpg", "time_seconds": 2, "ocr": {"text": "标题"}}])
         self.assertEqual({item["type"] for item in timeline["events"]}, {"speech", "frame", "ocr"})
 
+    def test_text_changes_record_appearance_replacement_and_disappearance(self):
+        from content_package import build_text_change_events
+        frames = [{"id": f"frame-{index:03}", "time_seconds": index, "ocr": {"filtered_text": text}} for index, text in enumerate(("", "第一句", "第二句", ""))]
+        self.assertEqual([item["change"] for item in build_text_change_events(frames)], ["appeared", "changed", "disappeared"])
+
+    def test_evidence_without_speech_uses_text_change_events(self):
+        from content_package import build_evidence_segments
+        events = [{"id": "text-change-001", "type": "text_change", "at": 2, "frame_ref": "frame-001"}]
+        segments = build_evidence_segments([], [{"id": "frame-001", "time_seconds": 2}], [], {"keyframes": []}, events)
+        self.assertEqual(segments[0]["transcript_refs"], [])
+        self.assertEqual(segments[0]["text_change_refs"], ["text-change-001"])
+
     def test_scene_boundaries_report_visual_change(self):
         frames = [{"path": "001.jpg", "perceptual_hash": "0000000000000000"}, {"path": "002.jpg", "perceptual_hash": "ffffffffffffffff"}]
         self.assertEqual(len(scene_boundaries(frames, threshold=.8)), 2)

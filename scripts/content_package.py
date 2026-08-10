@@ -251,7 +251,23 @@ def validate_content_package(package: dict) -> list[str]:
     return errors + validate_content_package_schema(package)
 
 
-def build_timeline(transcript: list[dict], frames: list[dict], scenes: list[dict] | None = None, duration_seconds: float | None = None) -> dict:
+def build_text_change_events(frames: list[dict]) -> list[dict]:
+    events, previous, previous_frame = [], "", None
+    for frame in frames:
+        current = ((frame.get("ocr") or {}).get("filtered_text") or (frame.get("ocr") or {}).get("text") or "").strip()
+        if current == previous:
+            previous_frame = frame
+            continue
+        change = "appeared" if current and not previous else "disappeared" if previous and not current else "changed"
+        events.append({"id": f"text-change-{len(events) + 1:03}", "kind": "fact", "type": "text_change",
+                       "change": change, "at": frame.get("time_seconds", 0), "frame_ref": frame.get("id"),
+                       "previous_frame_ref": previous_frame.get("id") if previous_frame else None,
+                       "previous_text": previous, "text": current})
+        previous, previous_frame = current, frame
+    return events
+
+
+def build_timeline(transcript: list[dict], frames: list[dict], scenes: list[dict] | None = None, duration_seconds: float | None = None, text_events: list[dict] | None = None) -> dict:
     events, relations = [], []
     for index, segment in enumerate(transcript, 1):
         speech_id = f"speech-{index:03}"
@@ -262,8 +278,10 @@ def build_timeline(transcript: list[dict], frames: list[dict], scenes: list[dict
         text = (frame.get("ocr") or {}).get("text", "")
         if text: events.append({"id": f"ocr-{frame_id}", "type": "ocr", "at": at, "frame_ref": frame_id, "text": text})
         for speech in [event for event in events if event["type"] == "speech" and event["start"] <= at <= event["end"]]: relations.append({"from": frame_id, "to": speech["id"], "type": "overlaps"})
-    for scene in scenes or []: events.append({"id": scene["id"], "type": "scene", "start": scene["start_seconds"], "end": scene["end_seconds"]})
-    return {"schema": {"name": "iwig-timeline", "version": "1.0.0"}, "duration_seconds": duration_seconds, "events": events, "relations": relations}
+    for scene in scenes or []: events.append({"id": scene["id"], "type": "scene_boundary", "start": scene["start_seconds"], "end": scene["end_seconds"]})
+    for event in text_events or []: events.append({"id": event["id"], "type": "text_change", "at": event["at"], "frame_ref": event.get("frame_ref"), "change": event["change"], "text": event["text"]})
+    events.sort(key=lambda item: (item.get("at", item.get("start", 0)), item["id"]))
+    return {"schema": {"name": "iwig-timeline", "version": "1.1.0"}, "duration_seconds": duration_seconds, "events": events, "relations": relations}
 
 
 def find_existing_package(output_dir: Path, note_id: str | None) -> Path | None:
@@ -453,7 +471,7 @@ def select_scene_change_frames(frames: list[dict], threshold: float = .72, limit
     } for frame in candidates[:limit]]
 
 
-def build_evidence_segments(transcript: list[dict], frames: list[dict], scene_candidates: list[dict], ocr: dict) -> list[dict]:
+def build_evidence_segments(transcript: list[dict], frames: list[dict], scene_candidates: list[dict], ocr: dict, text_events: list[dict] | None = None) -> list[dict]:
     """Link local factual artifacts by time; it deliberately makes no semantic claim."""
     frame_ids_by_path = {frame.get("path"): frame.get("id") for frame in frames}
     frame_ocr_refs = {
@@ -473,6 +491,14 @@ def build_evidence_segments(transcript: list[dict], frames: list[dict], scene_ca
             "ocr_refs": [frame_ocr_refs[frame_id] for frame_id in frame_refs if frame_id in frame_ocr_refs],
             "scene_candidate_refs": [candidate["frame_ref"] for candidate in scene_candidates if start <= candidate.get("time_seconds", -1) <= end],
         })
+    if not records:
+        anchors = sorted(scene_candidates + (text_events or []), key=lambda item: item.get("time_seconds", item.get("at", 0)))
+        for number, anchor in enumerate(anchors, 1):
+            at = anchor.get("time_seconds", anchor.get("at", 0))
+            records.append({"id": f"evidence-{number:03}", "kind": "fact", "start": at, "end": at,
+                            "transcript_refs": [], "transcript_text": "", "frame_refs": [anchor.get("frame_ref")] if anchor.get("frame_ref") else [],
+                            "ocr_refs": [], "scene_candidate_refs": [anchor.get("frame_ref")] if anchor.get("frame_ref") else [],
+                            "text_change_refs": [anchor["id"]] if anchor.get("type") == "text_change" else []})
     return records
 
 
@@ -502,7 +528,9 @@ def build_image_page_evidence(images: list[dict], ocr_records: list[dict]) -> li
     ocr_by_path = {item.get("path"): item for item in ocr_records}
     return [{"id": f"image-page-{index:03}", "kind": "fact", "page_number": index,
              "image_ref": image.get("path"), "ocr_ref": f"ocr-image-{index:03}" if image.get("path") in ocr_by_path else None,
-             "ocr_text": (ocr_by_path.get(image.get("path")) or {}).get("filtered_text", "")}
+             "ocr_text": (ocr_by_path.get(image.get("path")) or {}).get("filtered_text", ""),
+             "width": image.get("width"), "height": image.get("height"), "format": image.get("format"),
+             "text_density": round(len((ocr_by_path.get(image.get("path")) or {}).get("filtered_text", "")) / max((image.get("width") or 1) * (image.get("height") or 1), 1) * 1_000_000, 4)}
             for index, image in enumerate(images, 1)]
 
 
