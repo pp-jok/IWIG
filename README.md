@@ -40,6 +40,7 @@ The first transcription can take longer because `faster-whisper` obtains its `sm
 ```bash
 ~/.iwig/.venv/bin/python scripts/iwig.py capture --url 'https://www.xiaohongshu.com/explore/<NOTE_ID>' --keyframes --ocr
 ~/.iwig/.venv/bin/python scripts/iwig.py enrich ~/.iwig/output/<RUN_ID> --keyframes --ocr
+~/.iwig/.venv/bin/python scripts/iwig.py enrich ~/.iwig/output/<RUN_ID> --transcribe --asr-model small --language zh
 ~/.iwig/.venv/bin/python scripts/iwig.py enrich ~/.iwig/output/<RUN_ID> --keyframes --ocr --interpret
 ~/.iwig/.venv/bin/python scripts/iwig.py enrich ~/.iwig/output/<RUN_ID> --keyframes --ocr --interpret --describe-visuals
 ~/.iwig/.venv/bin/python scripts/iwig.py validate ~/.iwig/output/<RUN_ID>
@@ -50,7 +51,7 @@ The first transcription can take longer because `faster-whisper` obtains its `sm
 
 ## What one capture produces
 
-Each run is a self-contained directory under `~/.iwig/output/<RUN_ID>/`. It is safe to archive the directory as a content snapshot. `capture` always writes the public capture first; if a later local step is interrupted, resume it with `enrich` without requesting the platform again.
+Each run is a self-contained directory under `~/.iwig/output/<RUN_ID>/`. It is safe to archive the directory as a content snapshot. `capture` only writes public capture and requested lightweight evidence; transcription is an explicit `enrich --transcribe` stage. If a later local step is interrupted, resume it with `enrich` without requesting the platform again.
 
 | Path | When present | What it is for |
 | --- | --- | --- |

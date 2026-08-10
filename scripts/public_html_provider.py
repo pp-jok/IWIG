@@ -398,7 +398,8 @@ def _stream_download(client, url: str, destination: Path, max_bytes: int, refere
     media_timeout = httpx.Timeout(connect=None, read=None, write=None, pool=None)
     try:
         _validate_url(url)
-        with client.stream("GET", url, headers=headers, follow_redirects=True, timeout=media_timeout) as response:
+        with _stream_with_validated_redirects(client, url, headers=headers, public_xhs_only=False,
+                                              max_redirects=5, timeout=media_timeout) as response:
             if response.status_code != 200:
                 raise PublicCaptureError(f"{expected}_download_failed")
             content_type = response.headers.get("content-type", "").lower()
@@ -429,8 +430,7 @@ def _stream_download(client, url: str, destination: Path, max_bytes: int, refere
 
 
 def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0,
-                        max_video_bytes: int = 300 * 1024 * 1024,
-                        keep_raw_source: bool = False) -> dict:
+                        max_video_bytes: int = 300 * 1024 * 1024) -> dict:
     """Capture one public note without a browser, cookies, or private APIs."""
     _validate_url(url, public_xhs_only=True)
     import httpx

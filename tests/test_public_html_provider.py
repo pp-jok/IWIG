@@ -112,10 +112,19 @@ class PublicReportTests(unittest.TestCase):
         self.assertIn("获取完整度", report)
         self.assertIn("comments：intentionally_not_collected", report)
 
-    def test_transcription_stage_is_independent_of_ocr(self):
+    def test_transcription_stage_is_explicit_and_independent_of_ocr(self):
         source = (ROOT / "scripts" / "run_capture.py").read_text(encoding="utf-8")
         self.assertIn("def process_transcript", source)
-        self.assertIn("process_transcript(result, run)", source)
+        self.assertIn("if transcribe:", source)
+        self.assertIn("process_transcript(result, run, asr_model, language)", source)
+
+    def test_local_processing_skips_asr_until_explicitly_requested(self):
+        package = run_capture.new_content_package("completed", "https://example.test/n")
+        package["media"]["video"] = None
+        with tempfile.TemporaryDirectory() as temporary, patch("run_capture.process_transcript") as transcribe:
+            run_capture.process_local_stages(package, Path(temporary), keyframes=False, ocr=False,
+                                             transcribe=False, asr_model="small", language="zh")
+        transcribe.assert_not_called()
 
 
 class BrowserRemovalTests(unittest.TestCase):
@@ -134,7 +143,7 @@ class BrowserRemovalTests(unittest.TestCase):
 
 
 class TransportErrorTests(unittest.TestCase):
-    def test_media_download_uses_client_redirect_handling(self):
+    def test_media_download_disables_automatic_redirect_handling(self):
         class Response:
             status_code = 200
             headers = {"content-type": "video/mp4"}
@@ -148,7 +157,23 @@ class TransportErrorTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary, patch("public_html_provider._validate_url"):
             client = Client()
             _stream_download(client, "https://cdn.example/video.mp4", Path(temporary) / "video.mp4", 1024, "https://www.xiaohongshu.com/explore/a", "video")
-        self.assertTrue(client.kwargs["follow_redirects"])
+        self.assertFalse(client.kwargs["follow_redirects"])
+
+    def test_media_redirect_to_private_target_is_rejected_before_next_request(self):
+        class Response:
+            status_code = 302
+            headers = {"location": "http://127.0.0.1/private"}
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+        class Client:
+            def __init__(self): self.calls = []
+            def stream(self, _method, url, **kwargs):
+                self.calls.append((url, kwargs)); return Response()
+        with tempfile.TemporaryDirectory() as temporary, patch("public_html_provider._validate_url", side_effect=[None, None, PublicCaptureError("invalid_url")]):
+            client = Client()
+            with self.assertRaisesRegex(PublicCaptureError, "invalid_url"):
+                _stream_download(client, "https://cdn.example/video.mp4", Path(temporary) / "video.mp4", 1024, "https://www.xiaohongshu.com/explore/a", "video")
+        self.assertEqual(len(client.calls), 1)
 
     def test_page_client_does_not_send_media_referer_to_short_links(self):
         with tempfile.TemporaryDirectory() as temporary, \

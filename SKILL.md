@@ -27,7 +27,17 @@ This creates `~/.iwig/.venv` and installs local dependencies. No OpenAI API key 
 
 Add `--keyframes --ocr` to extract up to 12 local representative frames and run macOS Vision OCR on the cover, image pages, and frames. OCR is optional and never uploads media.
 
-The command writes `content_package.json`, `report.md`, selected-note/request provenance, and directly exposed video, cover, or ordered images. Add `--keep-raw-source` only when raw HTML and full initial state are required for debugging. Video transcription additionally creates raw and normalized timestamp segments, text, and SRT subtitles when available.
+The command writes `content_package.json`, `report.md`, selected-note/request provenance, and directly exposed video, cover, or ordered images. It always archives `source/page.html` and `source/initial_state.json` so the package can be checked or reprocessed without another platform request. Capture never loads an ASR model.
+
+## Optional local enrichment
+
+```bash
+~/.iwig/.venv/bin/python scripts/iwig.py enrich <RUN_ID> --keyframes --ocr
+~/.iwig/.venv/bin/python scripts/iwig.py enrich <RUN_ID> --transcribe --asr-model small --language zh
+~/.iwig/.venv/bin/python scripts/iwig.py validate <RUN_ID>
+```
+
+`--transcribe` uses local faster-whisper only when explicitly requested. The defaults (`small`, `zh`, CPU int8) suit a personal Mac; choose a smaller model or a different language when needed. IWIG does not install or invoke a visual-language model: frames, OCR, and visual candidates are evidence, not semantic recognition.
 
 For a direct note URL, an existing package with the same note ID under the output directory is reused rather than downloaded again. Use `--run-dir` to explicitly continue working in a chosen directory.
 Pass `--force` to deliberately capture a fresh snapshot.
@@ -43,5 +53,5 @@ Use `python scripts/iwig.py reindex <RUN_ID>` to create the strictly local `deri
 - Stop on login, verification, rate limiting, missing public post data, or inaccessible content. Missing media produces a structured partial package so text-only or image-note facts remain usable.
 - Do not collect comments or replies. The report must state that comments were intentionally not collected.
 - Use only complete direct video and cover URLs exposed in the selected current-note object. Never invent a URL from a file ID, refresh a token, create a signature, or retry through a private endpoint.
-- Keep local ASR only for successfully downloaded media. Do not use online transcription services.
+- Keep local ASR only for successfully downloaded media and only when `--transcribe` is requested. Do not use online transcription services.
 - OCR requires macOS Vision and may take longer on its first run while Swift compiles the local helper.

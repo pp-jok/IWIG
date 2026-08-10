@@ -33,14 +33,13 @@ def _paths_exist(run: Path, paths: list[str]) -> bool:
     except ValueError: return False
 
 
-def transcribe(video: Path) -> tuple[list[dict], dict]:
+def transcribe(video: Path, model_name: str = "small", language: str = "zh") -> tuple[list[dict], dict]:
     from faster_whisper import WhisperModel
-    model_name = "small"
     model = WhisperModel(model_name, device="cpu", compute_type="int8")
-    segments, info = model.transcribe(str(video), language="zh", vad_filter=True)
+    segments, info = model.transcribe(str(video), language=language, vad_filter=True)
     raw = [{"start": item.start, "end": item.end, "text": item.text, "avg_logprob": getattr(item, "avg_logprob", None)} for item in segments]
     normalized = [{"start": item["start"], "end": item["end"], "text": item["text"].strip()} for item in raw if item["text"].strip()]
-    return normalized, {"engine": "faster-whisper", "model": model_name, "language": getattr(info, "language", "zh"), "segment_count": len(normalized), "warnings": [] , "raw_segments": raw}
+    return normalized, {"engine": "faster-whisper", "model": model_name, "language": getattr(info, "language", language), "segment_count": len(normalized), "warnings": [] , "raw_segments": raw}
 
 
 def _path(run: Path, record: dict | None) -> Path | None:
@@ -68,7 +67,7 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
     _stage(result, "extract_keyframes", status, [item["path"] for item in frames], "PyAV")
 
 
-def process_transcript(result: dict, run: Path) -> None:
+def process_transcript(result: dict, run: Path, asr_model: str = "small", language: str = "zh") -> None:
     video = _path(run, result["media"].get("video"))
     previous = result.get("processing", {}).get("transcribe", {})
     input_hash = file_record(video, run)["sha256"] if video and video.is_file() else None
@@ -78,7 +77,7 @@ def process_transcript(result: dict, run: Path) -> None:
     if not video or not video.is_file():
         return
     try:
-        normalized, metadata = transcribe(video)
+        normalized, metadata = transcribe(video, asr_model, language)
         raw = metadata.pop("raw_segments")
         result["transcript"] = normalized  # compatibility
         result["transcript_metadata"] = metadata
@@ -186,9 +185,14 @@ def process_evidence(result: dict, run: Path, enabled: bool, describe_visuals: b
         _stage(result, "describe_visuals", "completed", ["derived/visual_descriptions.json"], "ocr_density_v1")
 
 
-def process_local_stages(result: dict, run: Path, *, keyframes: bool, ocr: bool, interpret: bool = False, describe_visuals: bool = False) -> None:
+def process_local_stages(result: dict, run: Path, *, keyframes: bool, ocr: bool, transcribe: bool = False,
+                         asr_model: str = "small", language: str = "zh", interpret: bool = False,
+                         describe_visuals: bool = False) -> None:
     process_keyframes(result, run, keyframes)
-    process_transcript(result, run)
+    if transcribe:
+        process_transcript(result, run, asr_model, language)
+    elif "transcribe" not in result.get("processing", {}):
+        _stage(result, "transcribe", "not_run", warnings=["transcription not requested"])
     process_ocr_cover(result, run, ocr)
     process_ocr_images(result, run, ocr)
     process_ocr_keyframes(result, run, ocr)
@@ -223,23 +227,23 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url"); parser.add_argument("--output-dir", default="output"); parser.add_argument("--run-dir")
     parser.add_argument("--timeout", type=float, default=20); parser.add_argument("--max-video-mb", type=int, default=300)
-    parser.add_argument("--force", action="store_true"); parser.add_argument("--keyframes", action="store_true"); parser.add_argument("--ocr", action="store_true"); parser.add_argument("--interpret", action="store_true"); parser.add_argument("--describe-visuals", action="store_true")
-    parser.add_argument("--enrich-dir"); parser.add_argument("--keep-raw-source", action="store_true")
+    parser.add_argument("--force", action="store_true"); parser.add_argument("--keyframes", action="store_true"); parser.add_argument("--ocr", action="store_true"); parser.add_argument("--transcribe", action="store_true"); parser.add_argument("--asr-model", default="small"); parser.add_argument("--language", default="zh"); parser.add_argument("--interpret", action="store_true"); parser.add_argument("--describe-visuals", action="store_true")
+    parser.add_argument("--enrich-dir")
     args = parser.parse_args(argv)
     if args.enrich_dir:
         output = Path(args.enrich_dir).expanduser().resolve(); manifest = output / "content_package.json"
-        result, _ = migrate_content_package_in_memory(json.loads(manifest.read_text(encoding="utf-8"))); process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr, interpret=args.interpret, describe_visuals=args.describe_visuals)
+        result, _ = migrate_content_package_in_memory(json.loads(manifest.read_text(encoding="utf-8"))); process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr, transcribe=args.transcribe, asr_model=args.asr_model, language=args.language, interpret=args.interpret, describe_visuals=args.describe_visuals)
     else:
         if not args.url: parser.error("--url is required unless --enrich-dir is used")
         root = Path(args.output_dir).expanduser().resolve(); existing = None if args.run_dir else find_existing_package(root, note_id_from_url(args.url))
         if should_reuse(existing, args.force): print(existing / "report.md"); return 0
         output = Path(args.run_dir).expanduser().resolve() if args.run_dir else root / datetime.now().strftime("%Y%m%d-%H%M%S"); output.mkdir(parents=True, exist_ok=True)
         try:
-            result = capture_public_note(args.url, output, args.timeout, args.max_video_mb * 1024 * 1024, args.keep_raw_source)
+            result = capture_public_note(args.url, output, args.timeout, args.max_video_mb * 1024 * 1024)
             # Checkpoint capture before CPU-bound local stages so interruption is recoverable.
             _write_json(output / "content_package.json", result)
             atomic_write_text(output / "report.md", render_public_report(result))
-            process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr, interpret=args.interpret, describe_visuals=args.describe_visuals)
+            process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr, transcribe=False, asr_model=args.asr_model, language=args.language, interpret=args.interpret, describe_visuals=args.describe_visuals)
         except PublicCaptureError as error:
             result = new_content_package("failed", redact_url(args.url)); result["errors"].append({"stage": "capture", "code": str(error)}); result["limitations"].append(str(error)); recompute_completeness(result)
     result["errors"].extend({"stage": "schema", "code": item} for item in validate_content_package(result))
