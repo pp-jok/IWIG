@@ -84,6 +84,10 @@ def migrate_content_package_in_memory(package: dict) -> tuple[dict, list[str]]:
         migrated["errors"] = [item for item in migrated.get("errors", []) if item not in legacy_index_errors]
         migrated["limitations"] = [item for item in migrated.get("limitations", []) if item != "analysis_index_build_failed"]
     for name, stage in (migrated.get("processing") or {}).items():
+        if isinstance(stage, dict) and stage.get("status") == "running":
+            stage["status"] = "partial"
+            stage.setdefault("warnings", []).append("interrupted_or_unfinished")
+            upsert_active_error(migrated, stage=name, code="interrupted_or_unfinished")
         if isinstance(stage, dict) and stage.get("status") in {"failed", "partial"} and not any(item.get("stage") == name for item in migrated["active_errors"]):
             upsert_active_error(migrated, stage=name, code=f"{name}_failed")
     migrated["processing_status"] = compute_processing_status(migrated.get("processing") or {})
