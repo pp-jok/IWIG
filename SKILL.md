@@ -47,6 +47,28 @@ Use `python scripts/iwig.py reindex <RUN_ID>` to create the strictly local `deri
 
 The workflow is `setup → capture → enrich → validate/reindex → downstream handoff`. `--json` writes exactly one JSON document to stdout, including `capture_status`, `processing_status`, `analysis_index_status`, `readiness`, errors, and artifact paths. A downstream Skill may consume `analysis_index.json` only when `analysis_index_status` is `completed`; otherwise it must use `content_package.json` and explicitly report the missing evidence. Evidence references (`scan_ref`, `frame_ref`, scene and text-change references) are validated against the index registry. See [downstream handoff](docs/downstream-handoff.md).
 
+## Output guide for downstream breakdown Skills
+
+Read in this order:
+
+1. CLI JSON: check `capture_status`, `processing_status`, `analysis_index_status`, `readiness`, and `active_errors` before making any claim.
+2. `derived/analysis_index.json`: use only when `analysis_index_status` is `completed`; it is the no-network normalized handoff.
+3. `content_package.json`: authoritative capture facts, completeness, media records, provenance, and fallback when the index is unavailable.
+4. Referenced local artifacts: inspect only the evidence needed for the task.
+
+| Output | Use in a breakdown Skill |
+| --- | --- |
+| `post.title`, `post.description`, `post.tags` | Topic, title, copy, and explicit on-page facts. Do not invent missing fields. |
+| `derived/transcript_segments.json` and `subtitles.srt` | Timestamped spoken structure, hooks, cases, transitions, and quotations. |
+| `derived/keyframes/` and `visual.keyframes` | Inspect representative visual evidence by `frame_ref`; do not infer unobserved frames. |
+| `visual.scene_change_events` | Locate factual visual changes. `scan_ref` is a scan signature; `frame_ref` is the usable exported image. |
+| `visual.text_change_events` and OCR records | Locate visible-text appearance, replacement, and disappearance; OCR is evidence, not semantic interpretation. |
+| `evidence_segments` | Join speech, frames, scene events, and OCR by time. Follow only resolvable `*_refs`. |
+| `candidate_labels` | Optional structural hints only; verify against their `evidence_refs` before using them. |
+| `source/page.html`, `source/initial_state.json` | Local provenance and parser debugging; not a default input for qualitative breakdown. |
+
+Use `readiness` to bound the analysis. `ready` permits use; `partial` requires a stated caveat; `unavailable`, `failed`, `zero`, or `intentionally_omitted` must never be silently treated as positive evidence. IWIG performs collection and evidence organization only. Final content, audience, narrative, or performance analysis belongs to the downstream Skill.
+
 `status` equals `capture_status` and reflects only public capture. Local-stage aggregation is `processing_status`; failures are listed in `active_errors` and resolved failures remain in `error_history`. Reuse is based on a valid completed capture and verified primary media, never on OCR, ASR, or index success. A missing or failed index returns `analysis_index: null`; downstream Skills must then use the content package and state the material limitation. `reindex` never requests the platform and upgrades older v2 packages in memory, persisting compatibility fields on the next write.
 
 ## Boundaries
