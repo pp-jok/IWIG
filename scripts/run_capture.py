@@ -11,7 +11,7 @@ from pathlib import Path
 
 from content_package import (atomic_write_json, atomic_write_text, build_evidence_segments, build_image_page_evidence, build_text_change_events, build_timeline, build_visual_candidates, completeness, compute_processing_status, describe_visual_records, extract_keyframes, field_status, file_record,
                              find_existing_package, new_content_package, ocr_macos,
-                             ocr_macos_batch, perceptual_hash, rule_based_interpretations, scene_boundaries, select_scene_change_frames, select_structural_keyframes, should_reuse, srt,
+                             ocr_macos_batch, perceptual_hash, rule_based_interpretations, scan_video_frames, scene_boundaries, select_representative_frames, select_scene_change_frames, select_structural_keyframes, should_reuse, srt,
                              safe_artifact_path, resolve_active_error, upsert_active_error, validate_content_package, migrate_content_package_in_memory)
 from public_html_provider import PublicCaptureError, capture_public_note, note_id_from_url, redact_url
 
@@ -57,6 +57,10 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
     if existing and _paths_exist(run, [item["path"] for item in existing]):
         _stage(result, "extract_keyframes", "completed", [item["path"] for item in existing], "PyAV", ["reused existing frames"])
         return
+    scan = scan_video_frames(video)
+    result["derived"]["frame_scan"] = scan.get("frames", [])
+    duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
+    result["derived"]["representative_frame_plan"] = select_representative_frames(scan.get("frames", []), duration) if scan.get("status") == "available" else []
     extracted = extract_keyframes(video, run / "derived" / "keyframes")
     frames = extracted.get("frames", [])
     for index, frame in enumerate(frames, 1):
