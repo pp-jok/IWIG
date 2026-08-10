@@ -48,7 +48,10 @@ def build_analysis_index(run: Path, package: dict | None = None) -> dict:
     transcript = normalized_segments
     for index, segment in enumerate(transcript, 1): evidence[f"speech-{index:03}"] = {"type": "speech", "source_path": "derived/transcript_segments.json", "start": segment["start"], "end": segment["end"]}
     for frame in derived.get("keyframes", []): evidence[frame["id"]] = {"type": "frame", "source_path": frame["path"], "at": frame["time_seconds"]}
+    for scan in derived.get("frame_scan", []): evidence[scan["id"]] = {"type": "scan", "at": scan["time_seconds"]}
     for scene in derived.get("scenes", []): evidence[scene["id"]] = {"type": "scene", "start": scene["start_seconds"], "end": scene["end_seconds"]}
+    for event in derived.get("text_change_events", []): evidence[event["id"]] = {"type": "text_change", "at": event["at"], "frame_ref": event.get("frame_ref")}
+    for number, event in enumerate(derived.get("scene_change_events", derived.get("scene_change_keyframes", [])), 1): evidence[f"scene-change-{number:03}"] = {"type": "scene_change", "scan_ref": event.get("scan_ref"), "frame_ref": event.get("frame_ref"), "at": event.get("time_seconds")}
     ocr = derived.get("ocr", {})
     frame_ids = {frame.get("path"): frame.get("id") for frame in derived.get("keyframes", [])}
     for kind in ("cover", "images", "keyframes"):
