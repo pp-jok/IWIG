@@ -50,7 +50,7 @@ def _result(run: Path, package: dict) -> dict:
     index_status = package.get("processing", {}).get("analysis_index", {}).get("status", "not_run")
     if not index_complete and index_status == "completed":
         index_status = "invalid" if index_path.is_file() else "missing"
-    normalize = {"completed": "ready", "not_run": "not_run", "failed": "failed", "partial": "partial"}
+    normalize = {"completed": "ready", "not_run": "unavailable", "failed": "failed", "partial": "partial"}
     readiness = index.get("analysis_readiness", {}) if index_complete else {"transcript": normalize.get(package.get("processing", {}).get("transcribe", {}).get("status"), "unavailable"), "frames": normalize.get(package.get("processing", {}).get("extract_keyframes", {}).get("status"), "unavailable"), "ocr": "ready" if any(name.startswith("ocr_") and stage.get("status") == "completed" for name, stage in package.get("processing", {}).items()) else "unavailable", "timeline": normalize.get(package.get("processing", {}).get("build_timeline", {}).get("status"), "unavailable"), "evidence": normalize.get(package.get("processing", {}).get("build_evidence_segments", {}).get("status"), "unavailable")}
     return {"status": package["status"], "capture_status": package.get("capture_status", package["status"]),
             "processing_status": package.get("processing_status", "not_run"), "run_dir": str(run),
