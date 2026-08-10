@@ -79,6 +79,10 @@ def process_transcript(result: dict, run: Path, asr_model: str = "small", langua
     input_hash = file_record(video, run)["sha256"] if video and video.is_file() else None
     options_hash = hashlib.sha256(json.dumps({"model": asr_model, "language": language, "device": "cpu", "compute_type": "int8", "vad_filter": True}, sort_keys=True).encode()).hexdigest()
     outputs = previous.get("output_paths", [])
+    legacy_metadata = (result.get("derived", {}).get("transcript") or {}).get("metadata") or result.get("transcript_metadata") or {}
+    if previous.get("status") == "completed" and previous.get("input_sha256") == input_hash and not previous.get("options_sha256") and legacy_metadata.get("model") == asr_model and legacy_metadata.get("language") == language and _paths_exist(run, outputs):
+        previous["options_sha256"] = options_hash
+        return
     if previous.get("status") == "completed" and previous.get("input_sha256") == input_hash and previous.get("options_sha256") == options_hash and _paths_exist(run, outputs):
         return
     if not video or not video.is_file():
