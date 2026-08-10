@@ -134,6 +134,10 @@ class ContentPackageTests(unittest.TestCase):
         self.assertEqual(len(selected), 2)
         self.assertTrue(any("scene_boundary" in item["selection_bases"] for item in selected))
 
+    def test_representative_extraction_accepts_selected_times(self):
+        from content_package import extract_keyframes
+        self.assertIn("selected_times", extract_keyframes.__annotations__)
+
     def test_structural_selection_prefers_hook_and_text_rich_change(self):
         frames = [{"id": "frame-001", "path": "001.jpg", "time_seconds": 2, "ocr": {"text": "开头承诺"}}, {"id": "frame-002", "path": "002.jpg", "time_seconds": 30, "ocr": {"text": ""}}, {"id": "frame-003", "path": "003.jpg", "time_seconds": 60, "ocr": {"text": "第一步 方法 清单"}}]
         selected = select_structural_keyframes(frames, duration_seconds=90, limit=2)

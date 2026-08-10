@@ -445,7 +445,8 @@ def select_representative_frames(scan: list[dict], duration_seconds: float | Non
     return sorted(selected, key=lambda item: item["time_seconds"])
 
 
-def extract_keyframes(path: Path, destination: Path, interval_seconds: int = 30, max_frames: int = 12) -> dict:
+def extract_keyframes(path: Path, destination: Path, interval_seconds: int = 30, max_frames: int = 12,
+                      selected_times: list[float] | None = None) -> dict:
     try:
         import av
         destination.mkdir(parents=True, exist_ok=True)
@@ -454,9 +455,11 @@ def extract_keyframes(path: Path, destination: Path, interval_seconds: int = 30,
             stream = next(item for item in container.streams if item.type == "video")
             duration = float(stream.duration * stream.time_base) if stream.duration is not None else None
             interval_seconds = adaptive_keyframe_interval(duration, interval_seconds, max_frames)
+            targets = sorted(set(selected_times or []))[:max_frames]
             for frame in container.decode(stream):
                 seconds = float(frame.time or 0)
-                if seconds < next_second:
+                target_time = targets[len(saved)] if targets and len(saved) < len(targets) else next_second
+                if seconds < target_time:
                     continue
                 target = destination / f"{len(saved) + 1:03}.jpg"
                 with av.open(str(target), "w") as output:
@@ -468,7 +471,7 @@ def extract_keyframes(path: Path, destination: Path, interval_seconds: int = 30,
                         output.mux(packet)
                 saved.append({"path": target.name, "time_seconds": seconds})
                 next_second = seconds + interval_seconds
-                if len(saved) >= max_frames:
+                if len(saved) >= max_frames or (targets and len(saved) >= len(targets)):
                     break
         return {"status": "available", "frames": saved}
     except Exception as error:

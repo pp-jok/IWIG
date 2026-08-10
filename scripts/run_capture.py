@@ -61,7 +61,8 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
     result["derived"]["frame_scan"] = scan.get("frames", [])
     duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
     result["derived"]["representative_frame_plan"] = select_representative_frames(scan.get("frames", []), duration) if scan.get("status") == "available" else []
-    extracted = extract_keyframes(video, run / "derived" / "keyframes")
+    extracted = extract_keyframes(video, run / "derived" / "keyframes",
+                                  selected_times=[item["time_seconds"] for item in result["derived"]["representative_frame_plan"]])
     frames = extracted.get("frames", [])
     for index, frame in enumerate(frames, 1):
         frame.update({"id": f"frame-{index:03}", "path": f"derived/keyframes/{frame['path']}", "perceptual_hash": perceptual_hash(run / f"derived/keyframes/{frame['path']}"), "ocr": {"status": "not_run", "text": "", "lines": []}})
