@@ -181,9 +181,11 @@ def process_evidence(result: dict, run: Path, enabled: bool, describe_visuals: b
     else:
         _stage(result, "build_evidence_segments", "not_run", warnings=["transcript unavailable; no factual segments generated"])
     if enabled and segments:
-        derived["interpretations"] = rule_based_interpretations(derived["evidence_segments"])
-        _write_json(run / "derived" / "interpretations.json", derived["interpretations"])
-        _stage(result, "interpret_evidence", "completed", ["derived/interpretations.json"], "rule_based_v1")
+        labels = [{**item, "kind": "structural_hint"} for item in rule_based_interpretations(derived["evidence_segments"])]
+        derived["candidate_labels"] = labels
+        derived["interpretations"] = labels  # compatibility for existing consumers
+        _write_json(run / "derived" / "candidate_labels.json", labels)
+        _stage(result, "interpret_evidence", "completed", ["derived/candidate_labels.json"], "rule_based_v1")
     elif enabled:
         _stage(result, "interpret_evidence", "not_run", warnings=["evidence segments unavailable"])
     else:
