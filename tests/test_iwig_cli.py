@@ -74,6 +74,13 @@ class IwigCliTests(unittest.TestCase):
             self.assertIsNone(result["analysis_index"])
             self.assertEqual(result["analysis_index_status"], "invalid")
 
+    def test_validate_accepts_not_run_transcript(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary)
+            atomic_write_json(run / "content_package.json", new_content_package("completed", "https://example.test/n"))
+            outcome = iwig.validate(run)
+        self.assertNotIn("package_unreadable", outcome["errors"])
+
     def test_cached_capture_does_not_recapture_when_index_rebuild_fails(self):
         with tempfile.TemporaryDirectory() as temporary:
             run = Path(temporary)

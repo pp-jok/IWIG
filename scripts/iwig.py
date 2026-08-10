@@ -124,10 +124,12 @@ def validate(run: Path) -> dict:
         if not path.is_file(): errors.append(f"missing_artifact:{record.get('path')}")
         elif record.get("sha256") and file_record(path, run)["sha256"] != record["sha256"]: errors.append(f"hash_mismatch:{record['path']}")
     derived = package.get("derived", {})
+    transcript = derived.get("transcript") or {}
     for key in ("raw_path", "normalized_path"):
-        if derived.get("transcript", {}).get(key): require_relative(derived["transcript"][key], f"derived.transcript.{key}")
+        if transcript.get(key): require_relative(transcript[key], f"derived.transcript.{key}")
     for frame in derived.get("keyframes", []): require_relative(frame.get("path"), f"frame:{frame.get('id')}")
-    if derived.get("timeline", {}).get("path"): require_relative(derived["timeline"]["path"], "derived.timeline.path")
+    timeline = derived.get("timeline") or {}
+    if timeline.get("path"): require_relative(timeline["path"], "derived.timeline.path")
     index_path = run / "derived" / "analysis_index.json"
     index_stage = package.get("processing", {}).get("analysis_index", {}).get("status", "not_run")
     if index_path.is_file():
