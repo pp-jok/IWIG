@@ -65,8 +65,12 @@ def _path(run: Path, record: dict | None) -> Path | None:
 
 def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
     video = _path(run, result["media"].get("video"))
-    if not enabled or not video or not video.is_file():
-        if "extract_keyframes" not in result.get("processing", {}): _stage(result, "extract_keyframes", "not_run", warnings=["keyframes not requested or video unavailable"])
+    if not enabled:
+        if "extract_keyframes" not in result.get("processing", {}): _stage(result, "extract_keyframes", "not_run", warnings=["keyframes not requested"])
+        return
+    if not video or not video.is_file():
+        _stage(result, "extract_keyframes", "not_run", warnings=["video unavailable"])
+        _checkpoint(result, run)
         return
     existing = result.get("derived", {}).get("keyframes") or []
     if existing and _paths_exist(run, [item["path"] for item in existing]):
@@ -86,28 +90,33 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
             candidate = min(existing, key=lambda frame: abs(frame["time_seconds"] - event["time_seconds"]), default=None)
             event["frame_ref"] = candidate.get("id") if candidate else None
         _stage(result, "extract_keyframes", "completed", [item["path"] for item in existing], "PyAV", ["reused existing frames"])
+        _checkpoint(result, run)
         return
-    scan = scan_video_frames(video)
-    result["derived"]["frame_scan"] = scan.get("frames", [])
-    result["derived"]["scenes"] = scene_boundaries(result["derived"]["frame_scan"])
-    result["derived"]["scene_change_events"] = [{"scan_ref": item["id"], "time_seconds": item["time_seconds"], "adjacent_similarity": item.get("adjacent_similarity"), "selection_basis": "dense_scan_perceptual_hash", "threshold": .72} for item in result["derived"]["frame_scan"] if item.get("adjacent_similarity") is not None and item["adjacent_similarity"] < .72]
-    result["derived"]["scene_change_keyframes"] = result["derived"]["scene_change_events"]
-    duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
-    result["derived"]["representative_frame_plan"] = select_representative_frames(scan.get("frames", []), duration) if scan.get("status") == "available" else []
-    extracted = extract_keyframes(video, run / "derived" / "keyframes",
-                                  selected_times=[item["time_seconds"] for item in result["derived"]["representative_frame_plan"]])
-    frames = extracted.get("frames", [])
-    for index, frame in enumerate(frames, 1):
-        frame.update({"id": f"frame-{index:03}", "path": f"derived/keyframes/{frame['path']}", "perceptual_hash": perceptual_hash(run / f"derived/keyframes/{frame['path']}"), "ocr": {"status": "not_run", "text": "", "lines": []}})
-    result["derived"]["keyframes"] = frames
-    for scene in result["derived"]["scenes"]:
-        candidate = min(frames, key=lambda frame: abs(frame["time_seconds"] - scene["start_seconds"]), default=None)
-        scene["representative_frame_ref"] = candidate.get("id") if candidate else None
-    for change in result["derived"]["scene_change_keyframes"]:
-        candidate = min(frames, key=lambda frame: abs(frame["time_seconds"] - change["time_seconds"]), default=None)
-        change["frame_ref"] = candidate.get("id") if candidate else None
-    status = "completed" if extracted.get("status") == "available" else extracted.get("status", "failed")
-    _stage(result, "extract_keyframes", status, [item["path"] for item in frames], "PyAV")
+    _start_stage(result, run, "extract_keyframes", "PyAV")
+    try:
+        scan = scan_video_frames(video)
+        result["derived"]["frame_scan"] = scan.get("frames", [])
+        result["derived"]["scenes"] = scene_boundaries(result["derived"]["frame_scan"])
+        result["derived"]["scene_change_events"] = [{"scan_ref": item["id"], "time_seconds": item["time_seconds"], "adjacent_similarity": item.get("adjacent_similarity"), "selection_basis": "dense_scan_perceptual_hash", "threshold": .72} for item in result["derived"]["frame_scan"] if item.get("adjacent_similarity") is not None and item["adjacent_similarity"] < .72]
+        result["derived"]["scene_change_keyframes"] = result["derived"]["scene_change_events"]
+        duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
+        result["derived"]["representative_frame_plan"] = select_representative_frames(scan.get("frames", []), duration) if scan.get("status") == "available" else []
+        extracted = extract_keyframes(video, run / "derived" / "keyframes", selected_times=[item["time_seconds"] for item in result["derived"]["representative_frame_plan"]])
+        frames = extracted.get("frames", [])
+        for index, frame in enumerate(frames, 1):
+            frame.update({"id": f"frame-{index:03}", "path": f"derived/keyframes/{frame['path']}", "perceptual_hash": perceptual_hash(run / f"derived/keyframes/{frame['path']}"), "ocr": {"status": "not_run", "text": "", "lines": []}})
+        result["derived"]["keyframes"] = frames
+        for scene in result["derived"]["scenes"]:
+            candidate = min(frames, key=lambda frame: abs(frame["time_seconds"] - scene["start_seconds"]), default=None)
+            scene["representative_frame_ref"] = candidate.get("id") if candidate else None
+        for change in result["derived"]["scene_change_keyframes"]:
+            candidate = min(frames, key=lambda frame: abs(frame["time_seconds"] - change["time_seconds"]), default=None)
+            change["frame_ref"] = candidate.get("id") if candidate else None
+        status = "completed" if extracted.get("status") == "available" else extracted.get("status", "failed")
+        _stage(result, "extract_keyframes", status, [item["path"] for item in frames], "PyAV")
+    except Exception as error:
+        _stage(result, "extract_keyframes", "failed", tool="PyAV", warnings=[type(error).__name__], code=type(error).__name__)
+    _checkpoint(result, run)
 
 
 def process_transcript(result: dict, run: Path, asr_model: str = "small", language: str = "zh") -> None:
@@ -123,7 +132,10 @@ def process_transcript(result: dict, run: Path, asr_model: str = "small", langua
     if previous.get("status") == "completed" and previous.get("input_sha256") == input_hash and previous.get("options_sha256") == options_hash and _paths_exist(run, outputs):
         return
     if not video or not video.is_file():
+        _stage(result, "transcribe", "not_run", warnings=["video unavailable"])
+        _checkpoint(result, run)
         return
+    _start_stage(result, run, "transcribe", "faster-whisper")
     try:
         normalized, metadata = transcribe(video, asr_model, language)
         raw = metadata.pop("raw_segments")
@@ -141,6 +153,7 @@ def process_transcript(result: dict, run: Path, asr_model: str = "small", langua
         result.setdefault("errors", []).append({"stage": "transcript", "code": type(error).__name__})
         result.setdefault("limitations", []).append(f"本地口播转写失败：{type(error).__name__}")
         _stage(result, "transcribe", "failed", tool="faster-whisper", warnings=[type(error).__name__], code=type(error).__name__)
+    _checkpoint(result, run)
 
 
 def _ocr_records(run: Path, records: list[dict]) -> list[dict]:
@@ -155,27 +168,55 @@ def _ocr_records(run: Path, records: list[dict]) -> list[dict]:
 
 def process_ocr_cover(result: dict, run: Path, enabled: bool) -> None:
     previous = result.get("processing", {}).get("ocr_cover", {})
-    if enabled and result["media"].get("cover") and previous.get("status") != "completed":
+    if not enabled or previous.get("status") == "completed":
+        return
+    if not result["media"].get("cover"):
+        _stage(result, "ocr_cover", "not_run", warnings=["cover unavailable"])
+        _checkpoint(result, run)
+        return
+    _start_stage(result, run, "ocr_cover", "macOS Vision")
+    try:
         records = _ocr_records(run, [result["media"]["cover"]])
         if not records:
-            _stage(result, "ocr_cover", "failed", warnings=["cover file unavailable"]); return
-        value = records[0]
-        result.setdefault("ocr", {"images": [], "keyframes": []})["cover"] = value; result["derived"]["ocr"]["cover"] = value
-        _stage(result, "ocr_cover", "completed" if value["status"] == "available" else "failed", [value["path"]], "macOS Vision")
+            _stage(result, "ocr_cover", "failed", warnings=["cover file unavailable"])
+        else:
+            value = records[0]
+            result.setdefault("ocr", {"images": [], "keyframes": []})["cover"] = value; result["derived"]["ocr"]["cover"] = value
+            _stage(result, "ocr_cover", "completed" if value["status"] == "available" else "failed", [value["path"]], "macOS Vision")
+    except Exception as error:
+        _stage(result, "ocr_cover", "failed", tool="macOS Vision", warnings=[type(error).__name__], code=type(error).__name__)
+    _checkpoint(result, run)
 
 
 def process_ocr_images(result: dict, run: Path, enabled: bool) -> None:
     previous = result.get("processing", {}).get("ocr_images", {})
-    if enabled and result["media"].get("images") and previous.get("status") != "completed":
+    if not enabled or previous.get("status") == "completed":
+        return
+    if not result["media"].get("images"):
+        _stage(result, "ocr_images", "not_run", warnings=["images unavailable"])
+        _checkpoint(result, run)
+        return
+    _start_stage(result, run, "ocr_images", "macOS Vision")
+    try:
         values = _ocr_records(run, result["media"]["images"])
         result.setdefault("ocr", {"images": [], "keyframes": []})["images"] = values; result["derived"]["ocr"]["images"] = values
         _stage(result, "ocr_images", "completed" if values and all(item["status"] == "available" for item in values) else "failed", [item["path"] for item in values], "macOS Vision")
+    except Exception as error:
+        _stage(result, "ocr_images", "failed", tool="macOS Vision", warnings=[type(error).__name__], code=type(error).__name__)
+    _checkpoint(result, run)
 
 
 def process_ocr_keyframes(result: dict, run: Path, enabled: bool) -> None:
     frames = result.get("derived", {}).get("keyframes", [])
     previous = result.get("processing", {}).get("ocr_keyframes", {})
-    if enabled and frames and previous.get("status") != "completed":
+    if not enabled or previous.get("status") == "completed":
+        return
+    if not frames:
+        _stage(result, "ocr_keyframes", "not_run", warnings=["keyframes unavailable"])
+        _checkpoint(result, run)
+        return
+    _start_stage(result, run, "ocr_keyframes", "macOS Vision")
+    try:
         records = _ocr_records(run, frames)
         for record, frame in zip(records, frames):
             frame["ocr"] = {key: value for key, value in record.items() if key != "path"}
@@ -184,6 +225,9 @@ def process_ocr_keyframes(result: dict, run: Path, enabled: bool) -> None:
         duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds") or 1
         result["derived"]["selected_keyframes"] = select_structural_keyframes(frames, duration)
         _stage(result, "ocr_keyframes", "completed" if records and all(item["status"] == "available" for item in records) else "failed", [item["path"] for item in records], "macOS Vision")
+    except Exception as error:
+        _stage(result, "ocr_keyframes", "failed", tool="macOS Vision", warnings=[type(error).__name__], code=type(error).__name__)
+    _checkpoint(result, run)
 
 
 def recompute_completeness(result: dict) -> None:
@@ -243,16 +287,13 @@ def process_evidence(result: dict, run: Path, enabled: bool, describe_visuals: b
 def process_local_stages(result: dict, run: Path, *, keyframes: bool, ocr: bool, transcribe: bool = False,
                          asr_model: str = "small", language: str = "zh", interpret: bool = False,
                          describe_visuals: bool = False) -> None:
-    if keyframes: _start_stage(result, run, "extract_keyframes", "PyAV")
     process_keyframes(result, run, keyframes)
     _checkpoint(result, run)
     if transcribe:
-        _start_stage(result, run, "transcribe", "faster-whisper")
         process_transcript(result, run, asr_model, language)
     elif "transcribe" not in result.get("processing", {}):
         _stage(result, "transcribe", "not_run", warnings=["transcription not requested"])
     _checkpoint(result, run)
-    if ocr: _start_stage(result, run, "ocr_cover", "macOS Vision")
     process_ocr_cover(result, run, ocr)
     process_ocr_images(result, run, ocr)
     process_ocr_keyframes(result, run, ocr)

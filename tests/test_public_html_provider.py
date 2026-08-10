@@ -1,4 +1,5 @@
 """Offline tests for the formal public HTML capture provider."""
+import json
 import sys
 import unittest
 import tempfile
@@ -94,10 +95,82 @@ class PublicReportTests(unittest.TestCase):
             run = Path(temporary)
             (run / "derived").mkdir()
             (run / "video.mp4").write_bytes(b"video")
-            result = {"media": {"video": {"path": "video.mp4"}}, "processing": {}, "derived": {}}
+            result = run_capture.new_content_package("completed", "https://example.test/n")
+            result["media"]["video"] = {"path": "video.mp4"}
             with patch("run_capture.transcribe", return_value=([{"start": 0, "end": 1, "text": "测试"}], {"raw_segments": []})):
                 run_capture.process_transcript(result, run)
         self.assertEqual(result["processing"]["transcribe"]["status"], "completed")
+
+    def test_enrich_reuses_completed_transcript_before_starting_stage(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary)
+            (run / "media").mkdir()
+            (run / "derived").mkdir()
+            video = run / "media" / "video.mp4"
+            video.write_bytes(b"video")
+            outputs = ["derived/transcript_raw_segments.json", "derived/transcript_segments.json",
+                       "derived/transcript.txt", "derived/subtitles.srt"]
+            for output in outputs:
+                (run / output).write_text("cached", encoding="utf-8")
+            result = run_capture.new_content_package("completed", "https://example.test/n")
+            result["media"]["video"] = {"path": "media/video.mp4"}
+            options_hash = run_capture.hashlib.sha256(run_capture.json.dumps({
+                "model": "small", "language": "zh", "device": "cpu", "compute_type": "int8", "vad_filter": True,
+            }, sort_keys=True).encode()).hexdigest()
+            result["processing"]["transcribe"] = {
+                "status": "completed", "input_sha256": run_capture.file_record(video, run)["sha256"],
+                "options_sha256": options_hash, "output_paths": outputs,
+            }
+            with patch("run_capture.transcribe") as transcribe:
+                run_capture.process_local_stages(result, run, keyframes=False, ocr=False, transcribe=True)
+            transcribe.assert_not_called()
+            self.assertEqual(result["processing"]["transcribe"]["status"], "completed")
+
+    def test_transcript_without_video_is_not_marked_running(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result = run_capture.new_content_package("completed", "https://example.test/n")
+            run_capture.process_local_stages(result, Path(temporary), keyframes=False, ocr=False, transcribe=True)
+        self.assertEqual(result["processing"]["transcribe"]["status"], "not_run")
+
+    def test_keyframes_without_video_are_not_marked_running(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result = run_capture.new_content_package("completed", "https://example.test/n")
+            run_capture.process_local_stages(result, Path(temporary), keyframes=True, ocr=False)
+        self.assertEqual(result["processing"]["extract_keyframes"]["status"], "not_run")
+
+    def test_ocr_checkpoints_each_stage_before_the_next_stage_starts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary)
+            (run / "media").mkdir()
+            (run / "media" / "cover.jpg").write_bytes(b"cover")
+            (run / "media" / "page-001.jpg").write_bytes(b"page")
+            result = run_capture.new_content_package("completed", "https://example.test/n")
+            result["media"]["cover"] = {"path": "media/cover.jpg"}
+            result["media"]["images"] = [{"path": "media/page-001.jpg"}]
+            with patch("run_capture._ocr_records", side_effect=[[
+                {"path": "media/cover.jpg", "status": "available", "text": "封面", "lines": []}
+            ], KeyboardInterrupt]):
+                with self.assertRaises(KeyboardInterrupt):
+                    run_capture.process_local_stages(result, run, keyframes=False, ocr=True)
+            persisted = json.loads((run / "content_package.json").read_text(encoding="utf-8"))
+        self.assertEqual(persisted["processing"]["ocr_cover"]["status"], "completed")
+        self.assertEqual(persisted["processing"]["ocr_images"]["status"], "running")
+
+    def test_interrupted_transcription_persists_running_then_migrates_to_partial(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary)
+            (run / "media").mkdir()
+            (run / "media" / "video.mp4").write_bytes(b"video")
+            result = run_capture.new_content_package("completed", "https://example.test/n")
+            result["media"]["video"] = {"path": "media/video.mp4"}
+            with patch("run_capture.transcribe", side_effect=KeyboardInterrupt):
+                with self.assertRaises(KeyboardInterrupt):
+                    run_capture.process_transcript(result, run)
+            persisted = json.loads((run / "content_package.json").read_text(encoding="utf-8"))
+            migrated, _ = run_capture.migrate_content_package_in_memory(persisted)
+        self.assertEqual(persisted["processing"]["transcribe"]["status"], "running")
+        self.assertEqual(migrated["processing"]["transcribe"]["status"], "partial")
+        self.assertIn("interrupted_or_unfinished", migrated["processing"]["transcribe"]["warnings"])
 
     def test_report_mentions_saved_cover_and_uncollected_comments(self):
         report = render_public_report({
