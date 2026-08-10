@@ -179,7 +179,9 @@ def main() -> int:
         print(run / "derived" / "analysis_index.json")
         return 0
     if args.command == "enrich":
-        code = run_capture.main(["--enrich-dir", args.run_dir] + (["--keyframes"] if args.keyframes else []) + (["--ocr"] if args.ocr else []) + (["--transcribe", "--asr-model", args.asr_model, "--language", args.language] if args.transcribe else []) + (["--interpret"] if args.interpret else []) + (["--describe-visuals"] if args.describe_visuals else []))
+        forwarded = ["--enrich-dir", args.run_dir] + (["--keyframes"] if args.keyframes else []) + (["--ocr"] if args.ocr else []) + (["--transcribe", "--asr-model", args.asr_model, "--language", args.language] if args.transcribe else []) + (["--interpret"] if args.interpret else []) + (["--describe-visuals"] if args.describe_visuals else [])
+        with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout):
+            code = run_capture.main(forwarded)
         run = Path(args.run_dir).expanduser().resolve()
         if (run / "content_package.json").is_file():
             package, _ = migrate_content_package_in_memory(json.loads((run / "content_package.json").read_text(encoding="utf-8")))

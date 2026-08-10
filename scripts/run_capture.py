@@ -60,7 +60,7 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
     scan = scan_video_frames(video)
     result["derived"]["frame_scan"] = scan.get("frames", [])
     result["derived"]["scenes"] = scene_boundaries(result["derived"]["frame_scan"])
-    result["derived"]["scene_change_keyframes"] = [{"frame_ref": item["id"], "time_seconds": item["time_seconds"], "adjacent_similarity": item.get("adjacent_similarity"), "selection_basis": "dense_scan_perceptual_hash", "threshold": .72} for item in result["derived"]["frame_scan"] if item.get("adjacent_similarity") is not None and item["adjacent_similarity"] < .72]
+    result["derived"]["scene_change_keyframes"] = [{"scan_ref": item["id"], "time_seconds": item["time_seconds"], "adjacent_similarity": item.get("adjacent_similarity"), "selection_basis": "dense_scan_perceptual_hash", "threshold": .72} for item in result["derived"]["frame_scan"] if item.get("adjacent_similarity") is not None and item["adjacent_similarity"] < .72]
     duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
     result["derived"]["representative_frame_plan"] = select_representative_frames(scan.get("frames", []), duration) if scan.get("status") == "available" else []
     extracted = extract_keyframes(video, run / "derived" / "keyframes",
@@ -69,6 +69,12 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
     for index, frame in enumerate(frames, 1):
         frame.update({"id": f"frame-{index:03}", "path": f"derived/keyframes/{frame['path']}", "perceptual_hash": perceptual_hash(run / f"derived/keyframes/{frame['path']}"), "ocr": {"status": "not_run", "text": "", "lines": []}})
     result["derived"]["keyframes"] = frames
+    for scene in result["derived"]["scenes"]:
+        candidate = min(frames, key=lambda frame: abs(frame["time_seconds"] - scene["start_seconds"]), default=None)
+        scene["representative_frame_ref"] = candidate.get("id") if candidate else None
+    for change in result["derived"]["scene_change_keyframes"]:
+        candidate = min(frames, key=lambda frame: abs(frame["time_seconds"] - change["time_seconds"]), default=None)
+        change["frame_ref"] = candidate.get("id") if candidate else None
     status = "completed" if extracted.get("status") == "available" else extracted.get("status", "failed")
     _stage(result, "extract_keyframes", status, [item["path"] for item in frames], "PyAV")
 

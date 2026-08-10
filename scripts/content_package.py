@@ -397,7 +397,13 @@ def adaptive_keyframe_interval(duration_seconds: float | None, default_interval:
     return round(min(float(default_interval), max(float(minimum_interval), duration_seconds / max(max_frames - 1, 1))), 1)
 
 
-def scan_video_frames(path: Path, cadence_seconds: float = 1.0, max_samples: int = 180) -> dict:
+def adaptive_scan_cadence(duration_seconds: float | None, max_samples: int = 180, minimum_seconds: float = 1.0) -> float:
+    if not duration_seconds or duration_seconds <= 0:
+        return minimum_seconds
+    return max(minimum_seconds, duration_seconds / max(max_samples - 1, 1))
+
+
+def scan_video_frames(path: Path, cadence_seconds: float | None = None, max_samples: int = 180) -> dict:
     """Read bounded, low-cost visual signatures without retaining scan images."""
     try:
         import av
@@ -405,6 +411,8 @@ def scan_video_frames(path: Path, cadence_seconds: float = 1.0, max_samples: int
         samples, next_second = [], 0.0
         with av.open(str(path)) as container:
             stream = next(item for item in container.streams if item.type == "video")
+            duration = float(stream.duration * stream.time_base) if stream.duration is not None else None
+            cadence_seconds = cadence_seconds or adaptive_scan_cadence(duration, max_samples)
             for frame in container.decode(stream):
                 at = float(frame.time or 0)
                 if at < next_second:
@@ -417,7 +425,7 @@ def scan_video_frames(path: Path, cadence_seconds: float = 1.0, max_samples: int
                 if len(samples) >= max_samples:
                     break
         scene_boundaries(samples)
-        return {"status": "available", "frames": samples}
+        return {"status": "available", "frames": samples, "cadence_seconds": cadence_seconds, "duration_seconds": duration}
     except Exception as error:
         return {"status": "failed", "reason": type(error).__name__, "frames": []}
 
@@ -540,7 +548,8 @@ def build_evidence_segments(transcript: list[dict], frames: list[dict], scene_ca
             "transcript_refs": [f"speech-{number:03}"], "transcript_text": speech.get("text", ""),
             "frame_refs": frame_refs,
             "ocr_refs": [frame_ocr_refs[frame_id] for frame_id in frame_refs if frame_id in frame_ocr_refs],
-            "scene_candidate_refs": [candidate["frame_ref"] for candidate in scene_candidates if start <= candidate.get("time_seconds", -1) <= end],
+            "scene_candidate_refs": [candidate.get("scan_ref") or candidate.get("frame_ref") for candidate in scene_candidates if start <= candidate.get("time_seconds", -1) <= end],
+            "scene_frame_refs": [candidate["frame_ref"] for candidate in scene_candidates if candidate.get("frame_ref") and start <= candidate.get("time_seconds", -1) <= end],
             "text_change_refs": [event["id"] for event in text_events or [] if start <= event.get("at", -1) <= end],
         })
     if not records:
