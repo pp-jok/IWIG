@@ -41,13 +41,14 @@ The first transcription can take longer because `faster-whisper` obtains its `sm
 ~/.iwig/.venv/bin/python scripts/iwig.py capture --url 'https://www.xiaohongshu.com/explore/<NOTE_ID>' --keyframes --ocr
 ~/.iwig/.venv/bin/python scripts/iwig.py enrich ~/.iwig/output/<RUN_ID> --keyframes --ocr
 ~/.iwig/.venv/bin/python scripts/iwig.py enrich ~/.iwig/output/<RUN_ID> --transcribe --asr-model small --language zh
+~/.iwig/.venv/bin/python scripts/iwig.py enrich ~/.iwig/output/<RUN_ID> --keyframes --ocr --json
 ~/.iwig/.venv/bin/python scripts/iwig.py enrich ~/.iwig/output/<RUN_ID> --keyframes --ocr --interpret
 ~/.iwig/.venv/bin/python scripts/iwig.py enrich ~/.iwig/output/<RUN_ID> --keyframes --ocr --interpret --describe-visuals
 ~/.iwig/.venv/bin/python scripts/iwig.py validate ~/.iwig/output/<RUN_ID>
 ~/.iwig/.venv/bin/python scripts/iwig.py reindex ~/.iwig/output/<RUN_ID>
 ```
 
-`--json` emits one machine-readable result. The content package is the stable machine interface; `report.md` is only a human-readable summary. See [data contract](docs/data-contract.md), [analysis index](docs/analysis-index.md), and [migration](docs/migration-from-xhs-url-video-capture.md).
+`capture --json` and `enrich --json` emit exactly one JSON document on stdout. It includes capture, processing and index statuses, `readiness`, active errors, and artifact paths. The content package is the stable machine interface; `report.md` is only a human-readable summary. See [data contract](docs/data-contract.md), [analysis index](docs/analysis-index.md), and [downstream handoff](docs/downstream-handoff.md).
 
 ## What one capture produces
 
@@ -70,7 +71,7 @@ Each run is a self-contained directory under `~/.iwig/output/<RUN_ID>/`. It is s
 | `derived/transcript.txt` / `derived/subtitles.srt` | video transcription succeeds | Readable transcript and subtitle interchange file. |
 | `derived/keyframes/*.jpg` | `--keyframes` and video available | Locally extracted visual samples. Sampling adapts to video duration and is capped at 12 frames. |
 | `derived/timeline.json` | local processing runs | Chronological union of transcript, frame, and scene events. |
-| `derived/evidence_segments.json` | transcript available | Factual links from transcript spans to overlapping frames and OCR; no content judgement. |
+| `derived/evidence_segments.json` | speech, scene, or OCR evidence available | Factual multimodal links between speech, representative frames, scene changes and text-change events; no content judgement. |
 | `derived/image_pages.json` | image note | Ordered page-to-OCR references for an image note. |
 | `derived/candidate_labels.json` | `--interpret` | Optional rule-based structural hints based on evidence segments; they are not final content analysis. |
 | `derived/visual_descriptions.json` | `--describe-visuals` | Lightweight OCR-density labels such as `text_card` or `subtitle_overlay`; this is not person, product, or screen-recording recognition. |
@@ -97,10 +98,11 @@ Public `source/page.html` and `source/initial_state.json` are archived by defaul
 
 When local enrichment is available, IWIG also writes these evidence-layer artifacts:
 
-- `derived/evidence_segments.json` links timestamped transcript segments to overlapping keyframes, keyframe OCR, and scene-change candidates. They are factual links only (`kind: "fact"`).
-- `derived.scene_change_keyframes` records frames selected from adjacent perceptual-hash similarity, including the exact threshold and selection basis. It supplements, rather than replaces, interval and structural keyframes.
+- Dense scan is local and adaptive: short videos scan no more frequently than once per second; long videos increase cadence to remain within the sample limit while retaining end coverage. Scan images are not saved.
+- `derived/scene_change_events` records perceptual-hash changes with `scan_ref` and, when available, a mapped representative `frame_ref`. The legacy `scene_change_keyframes` field is read-compatible only.
+- `derived/evidence_segments.json` links speech, frames, scene changes and OCR text-change events. Every reference is checked against the analysis-index evidence registry.
 - OCR retains its provider text and line data; `filtered_text` is a reproducible view using lines with confidence at least `0.80`.
-- `derived/interpretations.json` is created only by `enrich --interpret`. These are deliberately labelled `kind: "inference"`, include `evidence_refs`, and use the declared `rule_based_v1` method. They are hypotheses for downstream review, not captured facts.
+- `derived/candidate_labels.json` is created only by `enrich --interpret`. These are structural hints, include `evidence_refs`, and are not captured facts or final analysis.
 - `derived/image_pages.json` preserves image-page order and page OCR references. `--describe-visuals` adds only rule-based visual inferences; it never changes captured facts.
 
 If media, ASR, OCR, frames, or interpretation are unavailable, the package still preserves the completed stages and records the missing stage separately. Absence is never treated as a zero-valued public metric.

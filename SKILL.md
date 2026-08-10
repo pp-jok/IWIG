@@ -34,6 +34,7 @@ The command writes `content_package.json`, `report.md`, selected-note/request pr
 ```bash
 ~/.iwig/.venv/bin/python scripts/iwig.py enrich <RUN_ID> --keyframes --ocr
 ~/.iwig/.venv/bin/python scripts/iwig.py enrich <RUN_ID> --transcribe --asr-model small --language zh
+~/.iwig/.venv/bin/python scripts/iwig.py enrich <RUN_ID> --keyframes --ocr --json
 ~/.iwig/.venv/bin/python scripts/iwig.py validate <RUN_ID>
 ```
 
@@ -44,7 +45,7 @@ Pass `--force` to deliberately capture a fresh snapshot.
 
 Use `python scripts/iwig.py reindex <RUN_ID>` to create the strictly local `derived/analysis_index.json` projection. It is the intended no-network input for downstream breakdown and analysis Skills.
 
-The workflow is `setup → capture → enrich → validate/reindex → downstream handoff`. Use `--json` for Codex or automation. A downstream Skill may consume `analysis_index.json` only when `analysis_index_status` is `completed`; otherwise it must use `content_package.json` and explicitly report the missing evidence. See [downstream handoff](docs/downstream-handoff.md).
+The workflow is `setup → capture → enrich → validate/reindex → downstream handoff`. `--json` writes exactly one JSON document to stdout, including `capture_status`, `processing_status`, `analysis_index_status`, `readiness`, errors, and artifact paths. A downstream Skill may consume `analysis_index.json` only when `analysis_index_status` is `completed`; otherwise it must use `content_package.json` and explicitly report the missing evidence. Evidence references (`scan_ref`, `frame_ref`, scene and text-change references) are validated against the index registry. See [downstream handoff](docs/downstream-handoff.md).
 
 `status` equals `capture_status` and reflects only public capture. Local-stage aggregation is `processing_status`; failures are listed in `active_errors` and resolved failures remain in `error_history`. Reuse is based on a valid completed capture and verified primary media, never on OCR, ASR, or index success. A missing or failed index returns `analysis_index: null`; downstream Skills must then use the content package and state the material limitation. `reindex` never requests the platform and upgrades older v2 packages in memory, persisting compatibility fields on the next write.
 
