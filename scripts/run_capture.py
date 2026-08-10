@@ -20,6 +20,13 @@ def _write_json(path: Path, value: object) -> None:
     atomic_write_json(path, value)
 
 
+def _checkpoint(result: dict, run: Path) -> None:
+    """Persist completed local work before the next CPU/native stage starts."""
+    result["processing_status"] = compute_processing_status(result.get("processing", {}))
+    _write_json(run / "content_package.json", result)
+    atomic_write_text(run / "report.md", render_public_report(result))
+
+
 def _stage(result: dict, name: str, status: str, outputs=None, tool=None, warnings=None, code=None) -> None:
     previous = result.get("processing", {}).get(name, {})
     result.setdefault("processing", {})[name] = {"status": status, "output_paths": outputs or [], "input_sha256": previous.get("input_sha256"), "options_sha256": previous.get("options_sha256"), "tool": tool, "started_at": previous.get("started_at", datetime.now(timezone.utc).isoformat()), "completed_at": datetime.now(timezone.utc).isoformat(), "warnings": warnings or []}
@@ -229,14 +236,18 @@ def process_local_stages(result: dict, run: Path, *, keyframes: bool, ocr: bool,
                          asr_model: str = "small", language: str = "zh", interpret: bool = False,
                          describe_visuals: bool = False) -> None:
     process_keyframes(result, run, keyframes)
+    _checkpoint(result, run)
     if transcribe:
         process_transcript(result, run, asr_model, language)
     elif "transcribe" not in result.get("processing", {}):
         _stage(result, "transcribe", "not_run", warnings=["transcription not requested"])
+    _checkpoint(result, run)
     process_ocr_cover(result, run, ocr)
     process_ocr_images(result, run, ocr)
     process_ocr_keyframes(result, run, ocr)
+    _checkpoint(result, run)
     process_evidence(result, run, interpret, describe_visuals)
+    _checkpoint(result, run)
     frames = result.get("derived", {}).get("keyframes", [])
     duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
     try:
