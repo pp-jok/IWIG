@@ -59,6 +59,8 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
         return
     scan = scan_video_frames(video)
     result["derived"]["frame_scan"] = scan.get("frames", [])
+    result["derived"]["scenes"] = scene_boundaries(result["derived"]["frame_scan"])
+    result["derived"]["scene_change_keyframes"] = [{"frame_ref": item["id"], "time_seconds": item["time_seconds"], "adjacent_similarity": item.get("adjacent_similarity"), "selection_basis": "dense_scan_perceptual_hash", "threshold": .72} for item in result["derived"]["frame_scan"] if item.get("adjacent_similarity") is not None and item["adjacent_similarity"] < .72]
     duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
     result["derived"]["representative_frame_plan"] = select_representative_frames(scan.get("frames", []), duration) if scan.get("status") == "available" else []
     extracted = extract_keyframes(video, run / "derived" / "keyframes",
@@ -67,7 +69,6 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
     for index, frame in enumerate(frames, 1):
         frame.update({"id": f"frame-{index:03}", "path": f"derived/keyframes/{frame['path']}", "perceptual_hash": perceptual_hash(run / f"derived/keyframes/{frame['path']}"), "ocr": {"status": "not_run", "text": "", "lines": []}})
     result["derived"]["keyframes"] = frames
-    result["derived"]["scenes"] = scene_boundaries(frames)
     status = "completed" if extracted.get("status") == "available" else extracted.get("status", "failed")
     _stage(result, "extract_keyframes", status, [item["path"] for item in frames], "PyAV")
 
@@ -76,8 +77,9 @@ def process_transcript(result: dict, run: Path, asr_model: str = "small", langua
     video = _path(run, result["media"].get("video"))
     previous = result.get("processing", {}).get("transcribe", {})
     input_hash = file_record(video, run)["sha256"] if video and video.is_file() else None
+    options_hash = hashlib.sha256(json.dumps({"model": asr_model, "language": language, "device": "cpu", "compute_type": "int8", "vad_filter": True}, sort_keys=True).encode()).hexdigest()
     outputs = previous.get("output_paths", [])
-    if previous.get("status") == "completed" and previous.get("input_sha256") == input_hash and _paths_exist(run, outputs):
+    if previous.get("status") == "completed" and previous.get("input_sha256") == input_hash and previous.get("options_sha256") == options_hash and _paths_exist(run, outputs):
         return
     if not video or not video.is_file():
         return
@@ -93,6 +95,7 @@ def process_transcript(result: dict, run: Path, asr_model: str = "small", langua
         atomic_write_text(run / "derived" / "subtitles.srt", srt(normalized))
         _stage(result, "transcribe", "completed", ["derived/transcript_raw_segments.json", "derived/transcript_segments.json", "derived/transcript.txt", "derived/subtitles.srt"], "faster-whisper")
         result["processing"]["transcribe"]["input_sha256"] = input_hash
+        result["processing"]["transcribe"]["options_sha256"] = options_hash
     except Exception as error:
         result.setdefault("errors", []).append({"stage": "transcript", "code": type(error).__name__})
         result.setdefault("limitations", []).append(f"本地口播转写失败：{type(error).__name__}")
@@ -139,7 +142,6 @@ def process_ocr_keyframes(result: dict, run: Path, enabled: bool) -> None:
         result["derived"]["ocr"]["keyframes"] = records
         duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds") or 1
         result["derived"]["selected_keyframes"] = select_structural_keyframes(frames, duration)
-        result["derived"]["scene_change_keyframes"] = select_scene_change_frames(frames)
         _stage(result, "ocr_keyframes", "completed" if records and all(item["status"] == "available" for item in records) else "failed", [item["path"] for item in records], "macOS Vision")
 
 
@@ -179,7 +181,7 @@ def process_evidence(result: dict, run: Path, enabled: bool, describe_visuals: b
         _write_json(run / "derived" / "evidence_segments.json", segments)
         _stage(result, "build_evidence_segments", "completed", ["derived/evidence_segments.json"], "local factual linker")
     else:
-        _stage(result, "build_evidence_segments", "not_run", warnings=["transcript unavailable; no factual segments generated"])
+        _stage(result, "build_evidence_segments", "not_run", warnings=["no speech, scene, or OCR evidence available"])
     if enabled and segments:
         labels = [{**item, "kind": "structural_hint"} for item in rule_based_interpretations(derived["evidence_segments"])]
         derived["candidate_labels"] = labels

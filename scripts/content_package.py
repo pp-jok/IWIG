@@ -541,6 +541,7 @@ def build_evidence_segments(transcript: list[dict], frames: list[dict], scene_ca
             "frame_refs": frame_refs,
             "ocr_refs": [frame_ocr_refs[frame_id] for frame_id in frame_refs if frame_id in frame_ocr_refs],
             "scene_candidate_refs": [candidate["frame_ref"] for candidate in scene_candidates if start <= candidate.get("time_seconds", -1) <= end],
+            "text_change_refs": [event["id"] for event in text_events or [] if start <= event.get("at", -1) <= end],
         })
     if not records:
         anchors = sorted(scene_candidates + (text_events or []), key=lambda item: item.get("time_seconds", item.get("at", 0)))

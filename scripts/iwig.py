@@ -50,10 +50,11 @@ def _result(run: Path, package: dict) -> dict:
     index_status = package.get("processing", {}).get("analysis_index", {}).get("status", "not_run")
     if not index_complete and index_status == "completed":
         index_status = "invalid" if index_path.is_file() else "missing"
+    readiness = index.get("analysis_readiness", {}) if index_complete else {"transcript": package.get("processing", {}).get("transcribe", {}).get("status", "not_run"), "frames": package.get("processing", {}).get("extract_keyframes", {}).get("status", "not_run"), "ocr": "ready" if any(name.startswith("ocr_") and stage.get("status") == "completed" for name, stage in package.get("processing", {}).items()) else "unavailable", "timeline": package.get("processing", {}).get("build_timeline", {}).get("status", "not_run"), "evidence": package.get("processing", {}).get("build_evidence_segments", {}).get("status", "not_run")}
     return {"status": package["status"], "capture_status": package.get("capture_status", package["status"]),
             "processing_status": package.get("processing_status", "not_run"), "run_dir": str(run),
             "content_package": str(run / "content_package.json"), "analysis_index": str(index_path) if index_complete else None,
-            "analysis_index_status": "completed" if index_complete else index_status,
+            "analysis_index_status": "completed" if index_complete else index_status, "readiness": readiness,
             "active_errors": [{key: value for key, value in item.items() if key in {"stage", "code", "detail"}} for item in package.get("active_errors", [])],
             "report": str(run / "report.md")}
 
@@ -153,7 +154,7 @@ def main() -> int:
     setup = sub.add_parser("setup"); setup.add_argument("--home"); setup.add_argument("--dry-run", action="store_true")
     capture = sub.add_parser("capture")
     capture.add_argument("--url", required=True); capture.add_argument("--output-dir", default=str(HOME / "output")); capture.add_argument("--run-dir"); capture.add_argument("--timeout", type=float, default=20); capture.add_argument("--max-video-mb", type=int, default=300); capture.add_argument("--force", action="store_true"); capture.add_argument("--keyframes", action="store_true"); capture.add_argument("--ocr", action="store_true"); capture.add_argument("--json", action="store_true")
-    enrich = sub.add_parser("enrich"); enrich.add_argument("run_dir"); enrich.add_argument("--keyframes", action="store_true"); enrich.add_argument("--ocr", action="store_true"); enrich.add_argument("--transcribe", action="store_true"); enrich.add_argument("--asr-model", default="small"); enrich.add_argument("--language", default="zh"); enrich.add_argument("--interpret", action="store_true"); enrich.add_argument("--describe-visuals", action="store_true")
+    enrich = sub.add_parser("enrich"); enrich.add_argument("run_dir"); enrich.add_argument("--keyframes", action="store_true"); enrich.add_argument("--ocr", action="store_true"); enrich.add_argument("--transcribe", action="store_true"); enrich.add_argument("--asr-model", default="small"); enrich.add_argument("--language", default="zh"); enrich.add_argument("--interpret", action="store_true"); enrich.add_argument("--describe-visuals", action="store_true"); enrich.add_argument("--json", action="store_true")
     for name in ("reindex", "validate"): sub.add_parser(name).add_argument("run_dir")
     migrate = sub.add_parser("migrate-legacy-home"); migrate.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -184,6 +185,7 @@ def main() -> int:
             package, _ = migrate_content_package_in_memory(json.loads((run / "content_package.json").read_text(encoding="utf-8")))
             _rebuild_index_safely(run, package)
             package = json.loads((run / "content_package.json").read_text(encoding="utf-8"))
+            if args.json: print(json.dumps(_result(run, package), ensure_ascii=False))
             return max(code, _exit_code(package))
         return code
     root = Path(args.output_dir).expanduser().resolve()
