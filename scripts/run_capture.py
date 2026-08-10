@@ -55,6 +55,15 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
         return
     existing = result.get("derived", {}).get("keyframes") or []
     if existing and _paths_exist(run, [item["path"] for item in existing]):
+        if not result["derived"].get("frame_scan"):
+            scan = scan_video_frames(video)
+            result["derived"]["frame_scan"] = scan.get("frames", [])
+            result["derived"]["scenes"] = scene_boundaries(result["derived"]["frame_scan"])
+            duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
+            result["derived"]["representative_frame_plan"] = select_representative_frames(result["derived"]["frame_scan"], duration) if scan.get("status") == "available" else []
+        for scene in result["derived"].get("scenes", []):
+            candidate = min(existing, key=lambda frame: abs(frame["time_seconds"] - scene["start_seconds"]), default=None)
+            scene["representative_frame_ref"] = candidate.get("id") if candidate else None
         _stage(result, "extract_keyframes", "completed", [item["path"] for item in existing], "PyAV", ["reused existing frames"])
         return
     scan = scan_video_frames(video)
