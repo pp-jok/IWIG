@@ -72,7 +72,7 @@ Each run is a self-contained directory under `~/.iwig/output/<RUN_ID>/`. It is s
 | `derived/timeline.json` | local processing runs | Chronological union of transcript, frame, and scene events. |
 | `derived/evidence_segments.json` | transcript available | Factual links from transcript spans to overlapping frames and OCR; no content judgement. |
 | `derived/image_pages.json` | image note | Ordered page-to-OCR references for an image note. |
-| `derived/interpretations.json` | `--interpret` | Clearly labelled rule-based hypotheses based on evidence segments; review before using as a conclusion. |
+| `derived/candidate_labels.json` | `--interpret` | Optional rule-based structural hints based on evidence segments; they are not final content analysis. |
 | `derived/visual_descriptions.json` | `--describe-visuals` | Lightweight OCR-density labels such as `text_card` or `subtitle_overlay`; this is not person, product, or screen-recording recognition. |
 | `derived/analysis_index.json` | index completes | Stable no-network downstream index. Its content hash lets `iwig validate` detect stale indexes. |
 | `processing/validation.json` | `validate` | Latest package and artifact validation result. |
