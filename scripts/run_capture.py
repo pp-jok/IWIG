@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from datetime import datetime
 from pathlib import Path
 
-from content_package import (atomic_write_json, atomic_write_text, build_evidence_segments, build_timeline, completeness, compute_processing_status, extract_keyframes, field_status, file_record,
+from content_package import (atomic_write_json, atomic_write_text, build_evidence_segments, build_image_page_evidence, build_timeline, build_visual_candidates, completeness, compute_processing_status, describe_visual_records, extract_keyframes, field_status, file_record,
                              find_existing_package, new_content_package, ocr_macos,
                              ocr_macos_batch, perceptual_hash, rule_based_interpretations, scene_boundaries, select_scene_change_frames, select_structural_keyframes, should_reuse, srt,
                              safe_artifact_path, resolve_active_error, upsert_active_error, validate_content_package, migrate_content_package_in_memory)
@@ -150,11 +150,18 @@ def recompute_completeness(result: dict) -> None:
     }
 
 
-def process_evidence(result: dict, run: Path, enabled: bool) -> None:
+def process_evidence(result: dict, run: Path, enabled: bool, describe_visuals: bool = False) -> None:
     derived = result.setdefault("derived", {})
     derived.setdefault("scene_change_keyframes", [])
     derived.setdefault("evidence_segments", [])
     derived.setdefault("interpretations", [])
+    pages = build_image_page_evidence(result["media"].get("images", []), derived.get("ocr", {}).get("images", []))
+    derived["image_pages"] = pages
+    if pages:
+        _write_json(run / "derived" / "image_pages.json", pages)
+        _stage(result, "build_image_page_evidence", "completed", ["derived/image_pages.json"], "local factual linker")
+    candidates = build_visual_candidates(derived.get("keyframes", []), (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds"))
+    derived["visual_candidates"] = candidates
     transcript = result.get("transcript") or []
     segments = []
     if transcript:
@@ -172,15 +179,20 @@ def process_evidence(result: dict, run: Path, enabled: bool) -> None:
         _stage(result, "interpret_evidence", "not_run", warnings=["evidence segments unavailable"])
     else:
         _stage(result, "interpret_evidence", "not_run", warnings=["interpretation not requested"])
+    if describe_visuals:
+        visual = describe_visual_records(pages + candidates)
+        derived.setdefault("interpretations", []).extend(visual)
+        _write_json(run / "derived" / "visual_descriptions.json", visual)
+        _stage(result, "describe_visuals", "completed", ["derived/visual_descriptions.json"], "ocr_density_v1")
 
 
-def process_local_stages(result: dict, run: Path, *, keyframes: bool, ocr: bool, interpret: bool = False) -> None:
+def process_local_stages(result: dict, run: Path, *, keyframes: bool, ocr: bool, interpret: bool = False, describe_visuals: bool = False) -> None:
     process_keyframes(result, run, keyframes)
     process_transcript(result, run)
     process_ocr_cover(result, run, ocr)
     process_ocr_images(result, run, ocr)
     process_ocr_keyframes(result, run, ocr)
-    process_evidence(result, run, interpret)
+    process_evidence(result, run, interpret, describe_visuals)
     frames = result.get("derived", {}).get("keyframes", [])
     duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
     try:
@@ -211,12 +223,12 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url"); parser.add_argument("--output-dir", default="output"); parser.add_argument("--run-dir")
     parser.add_argument("--timeout", type=float, default=20); parser.add_argument("--max-video-mb", type=int, default=300)
-    parser.add_argument("--force", action="store_true"); parser.add_argument("--keyframes", action="store_true"); parser.add_argument("--ocr", action="store_true"); parser.add_argument("--interpret", action="store_true")
+    parser.add_argument("--force", action="store_true"); parser.add_argument("--keyframes", action="store_true"); parser.add_argument("--ocr", action="store_true"); parser.add_argument("--interpret", action="store_true"); parser.add_argument("--describe-visuals", action="store_true")
     parser.add_argument("--enrich-dir"); parser.add_argument("--keep-raw-source", action="store_true")
     args = parser.parse_args(argv)
     if args.enrich_dir:
         output = Path(args.enrich_dir).expanduser().resolve(); manifest = output / "content_package.json"
-        result, _ = migrate_content_package_in_memory(json.loads(manifest.read_text(encoding="utf-8"))); process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr, interpret=args.interpret)
+        result, _ = migrate_content_package_in_memory(json.loads(manifest.read_text(encoding="utf-8"))); process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr, interpret=args.interpret, describe_visuals=args.describe_visuals)
     else:
         if not args.url: parser.error("--url is required unless --enrich-dir is used")
         root = Path(args.output_dir).expanduser().resolve(); existing = None if args.run_dir else find_existing_package(root, note_id_from_url(args.url))
@@ -227,7 +239,7 @@ def main(argv=None) -> int:
             # Checkpoint capture before CPU-bound local stages so interruption is recoverable.
             _write_json(output / "content_package.json", result)
             atomic_write_text(output / "report.md", render_public_report(result))
-            process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr, interpret=args.interpret)
+            process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr, interpret=args.interpret, describe_visuals=args.describe_visuals)
         except PublicCaptureError as error:
             result = new_content_package("failed", redact_url(args.url)); result["errors"].append({"stage": "capture", "code": str(error)}); result["limitations"].append(str(error)); recompute_completeness(result)
     result["errors"].extend({"stage": "schema", "code": item} for item in validate_content_package(result))

@@ -95,6 +95,11 @@ class ContentPackageTests(unittest.TestCase):
     def test_video_metadata_reports_unavailable_without_pyav(self):
         self.assertEqual(video_metadata(Path("missing.mp4"))["status"], "failed")
 
+    def test_video_metadata_declares_optional_audio_fields(self):
+        metadata = video_metadata(Path("missing.mp4"))
+        self.assertIn("audio_codec", metadata)
+        self.assertIn("frame_rate", metadata)
+
     def test_finds_existing_package_by_note_id(self):
         with tempfile.TemporaryDirectory() as temporary:
             run = Path(temporary) / "20260804-010101"; run.mkdir()

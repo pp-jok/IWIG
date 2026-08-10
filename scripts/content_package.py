@@ -354,16 +354,18 @@ def _scene(frames: list[dict], start: int, end: int, similarity: float | None, n
 
 
 def video_metadata(path: Path) -> dict:
+    optional = {"frame_rate": None, "video_bitrate": None, "audio_codec": None, "audio_bitrate": None, "sample_rate": None, "channels": None}
     try:
         import av
         with av.open(str(path)) as container:
             stream = next((item for item in container.streams if item.type == "video"), None)
             if stream is None:
-                return {"status": "not_exposed"}
+                return {"status": "not_exposed", **optional}
             duration = float(stream.duration * stream.time_base) if stream.duration is not None else None
-            return {"status": "available", "duration_seconds": duration, "width": stream.width, "height": stream.height, "codec": stream.codec_context.name, "container": container.format.name}
+            audio = next((item for item in container.streams if item.type == "audio"), None)
+            return {"status": "available", "duration_seconds": duration, "width": stream.width, "height": stream.height, "codec": stream.codec_context.name, "container": container.format.name, "frame_rate": float(stream.average_rate) if stream.average_rate else None, "video_bitrate": stream.bit_rate, "audio_codec": audio.codec_context.name if audio else None, "audio_bitrate": audio.bit_rate if audio else None, "sample_rate": audio.rate if audio else None, "channels": audio.codec_context.channels if audio else None}
     except Exception as error:
-        return {"status": "failed", "reason": type(error).__name__}
+        return {"status": "failed", "reason": type(error).__name__, **optional}
 
 
 def extract_keyframes(path: Path, destination: Path, interval_seconds: int = 30, max_frames: int = 12) -> dict:
@@ -480,6 +482,41 @@ def rule_based_interpretations(segments: list[dict]) -> list[dict]:
             "confidence": .60 if label != "unknown" else .0,
             "evidence_refs": [segment["id"]], "method": "rule_based_v1",
         })
+    return output
+
+
+def build_image_page_evidence(images: list[dict], ocr_records: list[dict]) -> list[dict]:
+    ocr_by_path = {item.get("path"): item for item in ocr_records}
+    return [{"id": f"image-page-{index:03}", "kind": "fact", "page_number": index,
+             "image_ref": image.get("path"), "ocr_ref": f"ocr-image-{index:03}" if image.get("path") in ocr_by_path else None,
+             "ocr_text": (ocr_by_path.get(image.get("path")) or {}).get("filtered_text", "")}
+            for index, image in enumerate(images, 1)]
+
+
+def build_visual_candidates(frames: list[dict], duration_seconds: float | None) -> list[dict]:
+    duration = max(duration_seconds or 1, 1)
+    output = []
+    previous = ""
+    for frame in frames:
+        bases, at = [], frame.get("time_seconds", 0)
+        if at / duration <= .08: bases.append("start")
+        if at / duration >= .90: bases.append("end")
+        if frame.get("adjacent_similarity") is not None and frame["adjacent_similarity"] < .72: bases.append("scene_change")
+        text = (frame.get("ocr") or {}).get("filtered_text") or (frame.get("ocr") or {}).get("text", "")
+        if text and text != previous: bases.append("ocr_novelty")
+        if bases: output.append({"id": f"candidate-{frame['id']}", "kind": "fact", "frame_ref": frame["id"], "time_seconds": at, "selection_bases": bases})
+        previous = text
+    return output
+
+
+def describe_visual_records(records: list[dict]) -> list[dict]:
+    output = []
+    for record in records:
+        text = (record.get("ocr_text") or record.get("text") or "").lower()
+        label = "text_card" if len(text) >= 12 else "unknown"
+        output.append({"id": f"visual-{record['id']}", "kind": "inference", "label": label,
+                       "confidence": .60 if label != "unknown" else .0, "method": "ocr_density_v1",
+                       "evidence_refs": [record["id"]]})
     return output
 
 

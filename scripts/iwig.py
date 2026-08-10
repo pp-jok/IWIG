@@ -151,7 +151,7 @@ def main() -> int:
     setup = sub.add_parser("setup"); setup.add_argument("--home"); setup.add_argument("--dry-run", action="store_true")
     capture = sub.add_parser("capture")
     capture.add_argument("--url", required=True); capture.add_argument("--output-dir", default=str(HOME / "output")); capture.add_argument("--run-dir"); capture.add_argument("--timeout", type=float, default=20); capture.add_argument("--max-video-mb", type=int, default=300); capture.add_argument("--force", action="store_true"); capture.add_argument("--keyframes", action="store_true"); capture.add_argument("--ocr", action="store_true"); capture.add_argument("--keep-raw-source", action="store_true"); capture.add_argument("--json", action="store_true")
-    enrich = sub.add_parser("enrich"); enrich.add_argument("run_dir"); enrich.add_argument("--keyframes", action="store_true"); enrich.add_argument("--ocr", action="store_true"); enrich.add_argument("--interpret", action="store_true")
+    enrich = sub.add_parser("enrich"); enrich.add_argument("run_dir"); enrich.add_argument("--keyframes", action="store_true"); enrich.add_argument("--ocr", action="store_true"); enrich.add_argument("--interpret", action="store_true"); enrich.add_argument("--describe-visuals", action="store_true")
     for name in ("reindex", "validate"): sub.add_parser(name).add_argument("run_dir")
     migrate = sub.add_parser("migrate-legacy-home"); migrate.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
@@ -176,7 +176,7 @@ def main() -> int:
         print(run / "derived" / "analysis_index.json")
         return 0
     if args.command == "enrich":
-        code = run_capture.main(["--enrich-dir", args.run_dir] + (["--keyframes"] if args.keyframes else []) + (["--ocr"] if args.ocr else []) + (["--interpret"] if args.interpret else []))
+        code = run_capture.main(["--enrich-dir", args.run_dir] + (["--keyframes"] if args.keyframes else []) + (["--ocr"] if args.ocr else []) + (["--interpret"] if args.interpret else []) + (["--describe-visuals"] if args.describe_visuals else []))
         run = Path(args.run_dir).expanduser().resolve()
         if (run / "content_package.json").is_file():
             package, _ = migrate_content_package_in_memory(json.loads((run / "content_package.json").read_text(encoding="utf-8")))
