@@ -24,6 +24,8 @@ def request_error(error: Exception) -> PublicCaptureError:
 
 
 PUBLIC_HOSTS = {"xhslink.cn", "xhslink.com", "xiaohongshu.com", "www.xiaohongshu.com"}
+SHORT_LINK_HOSTS = {"xhslink.cn", "xhslink.com"}
+SHORT_LINK_ATTEMPTS = 3
 NOTE_PATTERNS = (
     re.compile(r"^/explore/([^/?#]+)"),
     re.compile(r"^/discovery/item/([^/?#]+)"),
@@ -114,9 +116,15 @@ def _stream_with_validated_redirects(client, url: str, *, headers: dict | None,
 
 
 def _get_public_page(client, url: str, max_redirects: int = 5):
-    return _request_with_validated_redirects(
-        client, url, public_xhs_only=True, max_redirects=max_redirects,
-    )
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    attempts = SHORT_LINK_ATTEMPTS if host in SHORT_LINK_HOSTS else 1
+    for attempt in range(attempts):
+        response = _request_with_validated_redirects(
+            client, url, public_xhs_only=True, max_redirects=max_redirects,
+        )
+        if response.status_code != 404 or attempt == attempts - 1:
+            return response
+        response.close()
 
 
 def _note_id(url: str) -> str | None:
@@ -400,9 +408,12 @@ def _stream_download(client, url: str, destination: Path, max_bytes: int, refere
                     raise PublicCaptureError("video_validation_failed")
         part.replace(final_path)
         return final_path
-    except Exception:
+    except PublicCaptureError:
         part.unlink(missing_ok=True)
         raise
+    except Exception as error:
+        part.unlink(missing_ok=True)
+        raise PublicCaptureError(f"{expected}_download_failed") from error
 
 
 def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0,

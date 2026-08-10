@@ -1,12 +1,14 @@
 """Offline tests for the formal public HTML capture provider."""
 import sys
 import unittest
+import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from public_html_provider import PublicCaptureError, _redact_urls, _request_with_validated_redirects, cover_candidates, image_candidates, redact_url, request_error
+from public_html_provider import PublicCaptureError, _get_public_page, _redact_urls, _request_with_validated_redirects, _stream_download, cover_candidates, image_candidates, redact_url, request_error
 sys.path.insert(0, str(ROOT / "scripts"))
 from run_capture import render_public_report
 
@@ -89,6 +91,23 @@ class TransportErrorTests(unittest.TestCase):
     def test_selected_note_redacts_master_and_backup_urls(self):
         data = _redact_urls({"masterUrl": "https://cdn.test/video?token=secret", "backupUrls": ["https://cdn.test/backup?token=secret"], "label": "unchanged"})
         self.assertNotIn("https://", str(data)); self.assertEqual(data["label"], "unchanged")
+
+    def test_media_transport_error_becomes_reportable_download_failure(self):
+        class BrokenStream:
+            def __enter__(self): raise OSError("read timed out")
+            def __exit__(self, *_): return False
+        with tempfile.TemporaryDirectory() as temporary, patch("public_html_provider._request_with_validated_redirects", return_value=BrokenStream()):
+            with self.assertRaisesRegex(PublicCaptureError, "video_download_failed"):
+                _stream_download(object(), "https://cdn.example/video.mp4", Path(temporary) / "video.mp4", 1024, "https://www.xiaohongshu.com/explore/a", "video")
+
+    def test_short_link_retries_transient_not_found_response(self):
+        class Response:
+            def __init__(self, status): self.status_code = status
+            def close(self): pass
+        with patch("public_html_provider._request_with_validated_redirects", side_effect=[Response(404), Response(200)]) as request:
+            response = _get_public_page(object(), "http://xhslink.cn/o/example")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(request.call_count, 2)
 
 
 class RedirectSafetyTests(unittest.TestCase):
