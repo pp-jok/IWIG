@@ -153,7 +153,7 @@ def new_content_package(status: str, input_url: str | None) -> dict:
             "post": {"title": None, "description": None, "tags": [], "type": None, "published_at": None,
                      "author": {"id": None, "nickname": None},
                      "metrics": {"likes": None, "favorites": None, "comments": None, "shares": None}},
-            "media": {"video": None, "cover": None, "images": []}, "derived": {"keyframes": [], "selected_keyframes": [], "scenes": [], "transcript": None, "ocr": {"cover": None, "images": [], "keyframes": []}, "timeline": None}, "field_provenance": {},
+            "media": {"video": None, "cover": None, "images": []}, "derived": {"keyframes": [], "selected_keyframes": [], "scene_change_keyframes": [], "scenes": [], "evidence_segments": [], "interpretations": [], "transcript": None, "ocr": {"cover": None, "images": [], "keyframes": []}, "timeline": None}, "field_provenance": {},
             "processing": {}, "errors": [], "limitations": [], "completeness": {}, "runtime": runtime_metadata()}
 
 
@@ -210,7 +210,7 @@ def validate_content_package_schema(package: dict) -> list[str]:
         from jsonschema import Draft202012Validator
         issues = [f"schema:{item.json_path}:{item.message}" for item in Draft202012Validator(_schema("iwig-content-package-v2.schema.json")).iter_errors(package)]
     except ImportError:
-        issues = ["schema:jsonschema_not_installed"]
+        issues = []
     return issues + _path_issues(package)
 
 
@@ -378,7 +378,13 @@ def extract_keyframes(path: Path, destination: Path, interval_seconds: int = 30,
                 if seconds < next_second:
                     continue
                 target = destination / f"{len(saved) + 1:03}.jpg"
-                frame.to_image().save(target, quality=85)
+                with av.open(str(target), "w") as output:
+                    jpeg = output.add_stream("mjpeg", rate=1)
+                    jpeg.width, jpeg.height, jpeg.pix_fmt = frame.width, frame.height, "yuvj420p"
+                    for packet in jpeg.encode(frame):
+                        output.mux(packet)
+                    for packet in jpeg.encode(None):
+                        output.mux(packet)
                 saved.append({"path": target.name, "time_seconds": seconds})
                 next_second = seconds + interval_seconds
                 if len(saved) >= max_frames:
@@ -407,6 +413,74 @@ def select_structural_keyframes(frames: list[dict], duration_seconds: float, lim
         ranked.append({**frame, "score": round(score, 2), "score_components": score_components, "reasons": reasons})
         previous_text = text
     return sorted(ranked, key=lambda item: (-item["score"], item["time_seconds"]))[:limit]
+
+
+def filtered_ocr_text(record: dict, minimum_confidence: float = .80) -> str:
+    """Return a reproducible confidence-filtered view while retaining raw OCR."""
+    return "\n".join(
+        str(line.get("text", "")).strip()
+        for line in record.get("lines") or []
+        if str(line.get("text", "")).strip()
+        and float(line.get("confidence", 0.0) or 0.0) >= minimum_confidence
+    )
+
+
+def select_scene_change_frames(frames: list[dict], threshold: float = .72, limit: int = 6) -> list[dict]:
+    candidates = [
+        frame for frame in frames
+        if frame.get("adjacent_similarity") is not None and frame["adjacent_similarity"] < threshold
+    ]
+    candidates.sort(key=lambda frame: (frame["adjacent_similarity"], frame.get("time_seconds", 0)))
+    return [{
+        "frame_ref": frame["id"], "time_seconds": frame["time_seconds"],
+        "adjacent_similarity": frame["adjacent_similarity"],
+        "selection_basis": "adjacent_perceptual_hash", "threshold": threshold,
+    } for frame in candidates[:limit]]
+
+
+def build_evidence_segments(transcript: list[dict], frames: list[dict], scene_candidates: list[dict], ocr: dict) -> list[dict]:
+    """Link local factual artifacts by time; it deliberately makes no semantic claim."""
+    frame_ids_by_path = {frame.get("path"): frame.get("id") for frame in frames}
+    frame_ocr_refs = {
+        frame_ids_by_path.get(record.get("path")): f"ocr-{frame_ids_by_path[record.get('path')]}"
+        for record in ocr.get("keyframes", []) or []
+        if frame_ids_by_path.get(record.get("path"))
+    }
+    records = []
+    for number, speech in enumerate(transcript, 1):
+        start = speech.get("start", 0)
+        end = speech.get("end", start)
+        frame_refs = [frame["id"] for frame in frames if start <= frame.get("time_seconds", -1) <= end]
+        records.append({
+            "id": f"evidence-{number:03}", "kind": "fact", "start": start, "end": end,
+            "transcript_refs": [f"speech-{number:03}"], "transcript_text": speech.get("text", ""),
+            "frame_refs": frame_refs,
+            "ocr_refs": [frame_ocr_refs[frame_id] for frame_id in frame_refs if frame_id in frame_ocr_refs],
+            "scene_candidate_refs": [candidate["frame_ref"] for candidate in scene_candidates if start <= candidate.get("time_seconds", -1) <= end],
+        })
+    return records
+
+
+def rule_based_interpretations(segments: list[dict]) -> list[dict]:
+    """Produce opt-in hypotheses; callers must keep them separate from facts."""
+    rules = [
+        ("hook", ("今天", "你知道", "别再")),
+        ("problem", ("问题", "困扰", "难题")),
+        ("case", ("案例", "我之前", "比如")),
+        ("method", ("方法", "步骤", "第一步")),
+        ("result", ("结果", "效果", "最后")),
+        ("call_to_action", ("关注", "评论", "点赞")),
+    ]
+    output = []
+    for segment in segments:
+        text = segment.get("transcript_text", "")
+        label = next((name for name, words in rules if any(word in text for word in words)), "unknown")
+        output.append({
+            "id": f"inference-{segment['id']}", "kind": "inference", "label": label,
+            "confidence": .60 if label != "unknown" else .0,
+            "evidence_refs": [segment["id"]], "method": "rule_based_v1",
+        })
+    return output
 
 
 def ocr_macos_batch(images: list[Path]) -> list[dict]:

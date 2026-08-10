@@ -9,9 +9,9 @@ from datetime import datetime, timezone
 from datetime import datetime
 from pathlib import Path
 
-from content_package import (atomic_write_json, atomic_write_text, build_timeline, completeness, compute_processing_status, extract_keyframes, field_status,
+from content_package import (atomic_write_json, atomic_write_text, build_evidence_segments, build_timeline, completeness, compute_processing_status, extract_keyframes, field_status, file_record,
                              find_existing_package, new_content_package, ocr_macos,
-                             ocr_macos_batch, perceptual_hash, scene_boundaries, select_structural_keyframes, should_reuse, srt,
+                             ocr_macos_batch, perceptual_hash, rule_based_interpretations, scene_boundaries, select_scene_change_frames, select_structural_keyframes, should_reuse, srt,
                              safe_artifact_path, resolve_active_error, upsert_active_error, validate_content_package, migrate_content_package_in_memory)
 from public_html_provider import PublicCaptureError, capture_public_note, note_id_from_url, redact_url
 
@@ -64,7 +64,8 @@ def process_keyframes(result: dict, run: Path, enabled: bool) -> None:
         frame.update({"id": f"frame-{index:03}", "path": f"derived/keyframes/{frame['path']}", "perceptual_hash": perceptual_hash(run / f"derived/keyframes/{frame['path']}"), "ocr": {"status": "not_run", "text": "", "lines": []}})
     result["derived"]["keyframes"] = frames
     result["derived"]["scenes"] = scene_boundaries(frames)
-    _stage(result, "extract_keyframes", extracted.get("status", "failed"), [item["path"] for item in frames], "PyAV")
+    status = "completed" if extracted.get("status") == "available" else extracted.get("status", "failed")
+    _stage(result, "extract_keyframes", status, [item["path"] for item in frames], "PyAV")
 
 
 def process_transcript(result: dict, run: Path) -> None:
@@ -97,7 +98,11 @@ def process_transcript(result: dict, run: Path) -> None:
 def _ocr_records(run: Path, records: list[dict]) -> list[dict]:
     usable = [(record, _path(run, record)) for record in records]
     usable = [(record, image) for record, image in usable if image and image.is_file()]
-    return [{"path": record["path"], **value} for (record, _), value in zip(usable, ocr_macos_batch([image for _, image in usable]))]
+    values = [{"path": record["path"], **value} for (record, _), value in zip(usable, ocr_macos_batch([image for _, image in usable]))]
+    from content_package import filtered_ocr_text
+    for value in values:
+        value["filtered_text"] = filtered_ocr_text(value)
+    return values
 
 
 def process_ocr_cover(result: dict, run: Path, enabled: bool) -> None:
@@ -130,6 +135,7 @@ def process_ocr_keyframes(result: dict, run: Path, enabled: bool) -> None:
         result["derived"]["ocr"]["keyframes"] = records
         duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds") or 1
         result["derived"]["selected_keyframes"] = select_structural_keyframes(frames, duration)
+        result["derived"]["scene_change_keyframes"] = select_scene_change_frames(frames)
         _stage(result, "ocr_keyframes", "completed" if records and all(item["status"] == "available" for item in records) else "failed", [item["path"] for item in records], "macOS Vision")
 
 
@@ -144,12 +150,37 @@ def recompute_completeness(result: dict) -> None:
     }
 
 
-def process_local_stages(result: dict, run: Path, *, keyframes: bool, ocr: bool) -> None:
+def process_evidence(result: dict, run: Path, enabled: bool) -> None:
+    derived = result.setdefault("derived", {})
+    derived.setdefault("scene_change_keyframes", [])
+    derived.setdefault("evidence_segments", [])
+    derived.setdefault("interpretations", [])
+    transcript = result.get("transcript") or []
+    segments = []
+    if transcript:
+        segments = build_evidence_segments(transcript, derived.get("keyframes", []), derived["scene_change_keyframes"], derived.get("ocr", {}))
+        derived["evidence_segments"] = segments
+        _write_json(run / "derived" / "evidence_segments.json", segments)
+        _stage(result, "build_evidence_segments", "completed", ["derived/evidence_segments.json"], "local factual linker")
+    else:
+        _stage(result, "build_evidence_segments", "not_run", warnings=["transcript unavailable; no factual segments generated"])
+    if enabled and segments:
+        derived["interpretations"] = rule_based_interpretations(derived["evidence_segments"])
+        _write_json(run / "derived" / "interpretations.json", derived["interpretations"])
+        _stage(result, "interpret_evidence", "completed", ["derived/interpretations.json"], "rule_based_v1")
+    elif enabled:
+        _stage(result, "interpret_evidence", "not_run", warnings=["evidence segments unavailable"])
+    else:
+        _stage(result, "interpret_evidence", "not_run", warnings=["interpretation not requested"])
+
+
+def process_local_stages(result: dict, run: Path, *, keyframes: bool, ocr: bool, interpret: bool = False) -> None:
     process_keyframes(result, run, keyframes)
     process_transcript(result, run)
     process_ocr_cover(result, run, ocr)
     process_ocr_images(result, run, ocr)
     process_ocr_keyframes(result, run, ocr)
+    process_evidence(result, run, interpret)
     frames = result.get("derived", {}).get("keyframes", [])
     duration = (result["media"].get("video") or {}).get("metadata", {}).get("duration_seconds")
     try:
@@ -180,12 +211,12 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url"); parser.add_argument("--output-dir", default="output"); parser.add_argument("--run-dir")
     parser.add_argument("--timeout", type=float, default=20); parser.add_argument("--max-video-mb", type=int, default=300)
-    parser.add_argument("--force", action="store_true"); parser.add_argument("--keyframes", action="store_true"); parser.add_argument("--ocr", action="store_true")
+    parser.add_argument("--force", action="store_true"); parser.add_argument("--keyframes", action="store_true"); parser.add_argument("--ocr", action="store_true"); parser.add_argument("--interpret", action="store_true")
     parser.add_argument("--enrich-dir"); parser.add_argument("--keep-raw-source", action="store_true")
     args = parser.parse_args(argv)
     if args.enrich_dir:
         output = Path(args.enrich_dir).expanduser().resolve(); manifest = output / "content_package.json"
-        result, _ = migrate_content_package_in_memory(json.loads(manifest.read_text(encoding="utf-8"))); process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr)
+        result, _ = migrate_content_package_in_memory(json.loads(manifest.read_text(encoding="utf-8"))); process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr, interpret=args.interpret)
     else:
         if not args.url: parser.error("--url is required unless --enrich-dir is used")
         root = Path(args.output_dir).expanduser().resolve(); existing = None if args.run_dir else find_existing_package(root, note_id_from_url(args.url))
@@ -193,7 +224,7 @@ def main(argv=None) -> int:
         output = Path(args.run_dir).expanduser().resolve() if args.run_dir else root / datetime.now().strftime("%Y%m%d-%H%M%S"); output.mkdir(parents=True, exist_ok=True)
         try:
             result = capture_public_note(args.url, output, args.timeout, args.max_video_mb * 1024 * 1024, args.keep_raw_source)
-            process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr)
+            process_local_stages(result, output, keyframes=args.keyframes, ocr=args.ocr, interpret=args.interpret)
         except PublicCaptureError as error:
             result = new_content_package("failed", redact_url(args.url)); result["errors"].append({"stage": "capture", "code": str(error)}); result["limitations"].append(str(error)); recompute_completeness(result)
     result["errors"].extend({"stage": "schema", "code": item} for item in validate_content_package(result))

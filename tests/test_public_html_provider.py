@@ -8,12 +8,21 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from public_html_provider import PublicCaptureError, _get_public_page, _redact_urls, _request_with_validated_redirects, _stream_download, cover_candidates, image_candidates, redact_url, request_error
+from public_html_provider import PublicCaptureError, USER_AGENT, _get_public_page, _redact_urls, _request_with_validated_redirects, _stream_download, capture_public_note, cover_candidates, image_candidates, redact_url, request_error, select_video_candidates
 sys.path.insert(0, str(ROOT / "scripts"))
 from run_capture import render_public_report
+import run_capture
 
 
 class CoverCandidateTests(unittest.TestCase):
+    def test_select_video_candidates_keeps_all_public_backups(self):
+        candidates = [
+            {"is_origin_candidate": False, "width": 720, "height": 1280, "bitrate": 100, "source_path": "backup.1"},
+            {"is_origin_candidate": True, "width": 720, "height": 1280, "bitrate": 100, "source_path": "master"},
+            {"is_origin_candidate": False, "width": 720, "height": 1280, "bitrate": 100, "source_path": "backup.2"},
+        ]
+        self.assertEqual([item["source_path"] for item in select_video_candidates(candidates)], ["master", "backup.1", "backup.2"])
+
     def test_uses_direct_image_urls_and_ignores_file_ids(self):
         note = {
             "imageList": [
@@ -48,6 +57,43 @@ class CoverCandidateTests(unittest.TestCase):
 
 
 class PublicReportTests(unittest.TestCase):
+    def test_successful_capture_syncs_capture_status(self):
+        class Response:
+            status_code = 200
+            text = "<html></html>"
+            url = "https://www.xiaohongshu.com/explore/note"
+
+        class Client:
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+
+        def download(_client, _url, target, *_args):
+            target.write_bytes(b"video")
+            return target
+
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch("public_html_provider._validate_url"), \
+             patch("httpx.Client", return_value=Client()), \
+             patch("public_html_provider._get_public_page", return_value=Response()), \
+             patch("public_html_provider._initial_state", return_value={}), \
+             patch("public_html_provider._current_note", return_value=({"type": "video"}, "note")), \
+             patch("public_html_provider._normalize", return_value=run_capture.new_content_package("partial", "https://www.xiaohongshu.com/explore/note")), \
+             patch("public_html_provider._video_candidates", return_value=[{"url": "https://cdn.example/video.mp4", "source_path": "video.master", "is_origin_candidate": True, "width": 0, "height": 0, "bitrate": 0}]), \
+             patch("public_html_provider._stream_download", side_effect=download):
+            package = capture_public_note("https://www.xiaohongshu.com/explore/note", Path(temporary))
+        self.assertEqual(package["status"], "completed")
+        self.assertEqual(package["capture_status"], "completed")
+
+    def test_transcript_processing_hashes_the_downloaded_video(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary)
+            (run / "derived").mkdir()
+            (run / "video.mp4").write_bytes(b"video")
+            result = {"media": {"video": {"path": "video.mp4"}}, "processing": {}, "derived": {}}
+            with patch("run_capture.transcribe", return_value=([{"start": 0, "end": 1, "text": "测试"}], {"raw_segments": []})):
+                run_capture.process_transcript(result, run)
+        self.assertEqual(result["processing"]["transcribe"]["status"], "completed")
+
     def test_report_mentions_saved_cover_and_uncollected_comments(self):
         report = render_public_report({
             "source": {"resolved_url": "https://www.xiaohongshu.com/explore/note", "note_id": "note"},
@@ -83,6 +129,31 @@ class BrowserRemovalTests(unittest.TestCase):
 
 
 class TransportErrorTests(unittest.TestCase):
+    def test_media_download_uses_client_redirect_handling(self):
+        class Response:
+            status_code = 200
+            headers = {"content-type": "video/mp4"}
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def iter_bytes(self): yield b"\x00\x00\x00\x18ftypisom"
+        class Client:
+            def stream(self, *_args, **kwargs):
+                self.kwargs = kwargs
+                return Response()
+        with tempfile.TemporaryDirectory() as temporary, patch("public_html_provider._validate_url"):
+            client = Client()
+            _stream_download(client, "https://cdn.example/video.mp4", Path(temporary) / "video.mp4", 1024, "https://www.xiaohongshu.com/explore/a", "video")
+        self.assertTrue(client.kwargs["follow_redirects"])
+
+    def test_page_client_does_not_send_media_referer_to_short_links(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch("httpx.Client") as client, \
+             patch("public_html_provider._validate_url"), \
+             patch("public_html_provider._get_public_page", side_effect=OSError("stop after client setup")):
+            with self.assertRaisesRegex(PublicCaptureError, "public_page_request_failed"):
+                capture_public_note("http://xhslink.cn/o/example", Path(temporary))
+        self.assertEqual(client.call_args.kwargs["headers"], {"User-Agent": USER_AGENT})
+
     def test_maps_transport_errors_to_a_reportable_public_error(self):
         mapped = request_error(OSError("dns unavailable"))
         self.assertIsInstance(mapped, PublicCaptureError)
@@ -96,9 +167,28 @@ class TransportErrorTests(unittest.TestCase):
         class BrokenStream:
             def __enter__(self): raise OSError("read timed out")
             def __exit__(self, *_): return False
-        with tempfile.TemporaryDirectory() as temporary, patch("public_html_provider._request_with_validated_redirects", return_value=BrokenStream()):
+        class Client:
+            def stream(self, *_args, **_kwargs): return BrokenStream()
+        with tempfile.TemporaryDirectory() as temporary, patch("public_html_provider._validate_url"):
             with self.assertRaisesRegex(PublicCaptureError, "video_download_failed"):
-                _stream_download(object(), "https://cdn.example/video.mp4", Path(temporary) / "video.mp4", 1024, "https://www.xiaohongshu.com/explore/a", "video")
+                _stream_download(Client(), "https://cdn.example/video.mp4", Path(temporary) / "video.mp4", 1024, "https://www.xiaohongshu.com/explore/a", "video")
+
+    def test_media_download_has_no_read_timeout_after_connecting(self):
+        class Response:
+            status_code = 200
+            headers = {"content-type": "video/mp4"}
+            def __enter__(self): return self
+            def __exit__(self, *_): return False
+            def iter_bytes(self): yield b"\x00\x00\x00\x18ftypisom"
+        class Client:
+            def stream(self, *_args, **kwargs): self.kwargs = kwargs; return Response()
+        with tempfile.TemporaryDirectory() as temporary, patch("public_html_provider._validate_url"):
+            client = Client(); _stream_download(client, "https://cdn.example/video.mp4", Path(temporary) / "video.mp4", 1024, "https://www.xiaohongshu.com/explore/a", "video")
+        timeout = client.kwargs["timeout"]
+        self.assertIsNone(timeout.connect)
+        self.assertIsNone(timeout.read)
+        self.assertIsNone(timeout.write)
+        self.assertIsNone(timeout.pool)
 
     def test_short_link_retries_transient_not_found_response(self):
         class Response:

@@ -81,18 +81,18 @@ def _redirect_target(current: str, response) -> str | None:
 
 def _request_with_validated_redirects(client, url: str, *, headers: dict | None = None,
                                       public_xhs_only: bool = False, stream: bool = False,
-                                      max_redirects: int = 5):
+                                      max_redirects: int = 5, timeout=None):
     """Request a URL only after validating every location in its redirect chain.
 
     When ``stream`` is true this returns a context manager for the final response.
     Redirect responses are always closed before the next hop is requested.
     """
     if stream:
-        return _stream_with_validated_redirects(client, url, headers=headers, public_xhs_only=public_xhs_only, max_redirects=max_redirects)
+        return _stream_with_validated_redirects(client, url, headers=headers, public_xhs_only=public_xhs_only, max_redirects=max_redirects, timeout=timeout)
     current = url
     for hop in range(max_redirects + 1):
         _validate_url(current, public_xhs_only=public_xhs_only)
-        response = client.get(current, headers=headers, follow_redirects=False)
+        response = client.get(current, headers=headers, follow_redirects=False, timeout=timeout)
         target = _redirect_target(current, response)
         if target is None:
             return response
@@ -102,11 +102,11 @@ def _request_with_validated_redirects(client, url: str, *, headers: dict | None 
 
 @contextmanager
 def _stream_with_validated_redirects(client, url: str, *, headers: dict | None,
-                                     public_xhs_only: bool, max_redirects: int):
+                                     public_xhs_only: bool, max_redirects: int, timeout=None):
     current = url
     for _ in range(max_redirects + 1):
         _validate_url(current, public_xhs_only=public_xhs_only)
-        with client.stream("GET", current, headers=headers, follow_redirects=False) as response:
+        with client.stream("GET", current, headers=headers, follow_redirects=False, timeout=timeout) as response:
             target = _redirect_target(current, response)
             if target is None:
                 yield response
@@ -361,6 +361,15 @@ def _select_video(candidates: list[dict]) -> dict | None:
     return max(candidates, key=lambda item: (item["is_origin_candidate"], (item["width"] or 0) * (item["height"] or 0), item["bitrate"] or 0), default=None)
 
 
+def select_video_candidates(candidates: list[dict]) -> list[dict]:
+    """Prefer the best stream first, while retaining every public fallback."""
+    return sorted(candidates, key=lambda item: (
+        item["is_origin_candidate"],
+        (item["width"] or 0) * (item["height"] or 0),
+        item["bitrate"] or 0,
+    ), reverse=True)
+
+
 def public_candidate(candidate: dict) -> dict:
     """Keep candidate provenance without persisting expiring signed URLs."""
     url = candidate.get("url", "")
@@ -383,10 +392,13 @@ def _extension(content_type: str, fallback: str) -> str:
 
 
 def _stream_download(client, url: str, destination: Path, max_bytes: int, referer: str, expected: str) -> Path:
+    import httpx
     part = destination.with_suffix(destination.suffix + ".part")
     headers = {"User-Agent": USER_AGENT, "Referer": referer}
+    media_timeout = httpx.Timeout(connect=None, read=None, write=None, pool=None)
     try:
-        with _request_with_validated_redirects(client, url, headers=headers, stream=True) as response:
+        _validate_url(url)
+        with client.stream("GET", url, headers=headers, follow_redirects=True, timeout=media_timeout) as response:
             if response.status_code != 200:
                 raise PublicCaptureError(f"{expected}_download_failed")
             content_type = response.headers.get("content-type", "").lower()
@@ -424,7 +436,7 @@ def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0,
     import httpx
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    with httpx.Client(headers={"User-Agent": USER_AGENT, "Referer": "https://www.xiaohongshu.com/"}, timeout=httpx.Timeout(timeout, connect=min(timeout, 10)), follow_redirects=False, verify=True, cookies=None) as client:
+    with httpx.Client(headers={"User-Agent": USER_AGENT}, timeout=httpx.Timeout(timeout, connect=min(timeout, 10)), follow_redirects=False, verify=True, cookies=None) as client:
         try:
             response = _get_public_page(client, url)
         except Exception as error:
@@ -453,7 +465,7 @@ def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0,
         covers = cover_candidates(note)
         images = image_candidates(note) if str(_first(note, "type", "noteType", "note_type") or "").lower() not in {"video", "video_note"} else []
         (source_dir / "media_candidates.json").write_text(json.dumps({"video": [public_candidate(item) for item in videos], "cover": [public_candidate(item) for item in covers], "images": [public_candidate(item) for item in images]}, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-        selected_videos = sorted(videos, key=lambda item: (item["is_origin_candidate"], (item["width"] or 0) * (item["height"] or 0), item["bitrate"] or 0), reverse=True)[:2]
+        selected_videos = select_video_candidates(videos)
         for selected_video in selected_videos:
             try:
                 video_path = _stream_download(client, selected_video["url"], media_dir / "video.mp4", max_video_bytes, source["resolved_url"], "video")
@@ -481,6 +493,8 @@ def capture_public_note(url: str, output_dir: Path, timeout: float = 20.0,
             result["errors"].append({"stage": "media_download", "code": "public_media_not_available"})
             result["limitations"].append("public_media_not_available")
             result["status"] = "partial"
+            result["capture_status"] = "partial"
             return result
         result["status"] = "completed"
+        result["capture_status"] = "completed"
         return result
