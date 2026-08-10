@@ -122,6 +122,11 @@ class ContentPackageTests(unittest.TestCase):
         self.assertEqual(adaptive_keyframe_interval(300), 27.3)
         self.assertEqual(adaptive_keyframe_interval(None), 30.0)
 
+    def test_adaptive_scan_cadence_covers_long_video_with_bounded_samples(self):
+        from content_package import adaptive_scan_cadence
+        self.assertEqual(adaptive_scan_cadence(45, 180), 1.0)
+        self.assertGreaterEqual(adaptive_scan_cadence(300, 180) * 179, 300)
+
     def test_representative_selection_is_independent_of_scan_density(self):
         from content_package import select_representative_frames
         scan = [
