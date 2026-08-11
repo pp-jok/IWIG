@@ -214,6 +214,11 @@ class BrowserRemovalTests(unittest.TestCase):
         self.assertIn("content_package.json", text)
         self.assertIn("Do not use a browser", text)
 
+    def test_skill_documents_default_video_transcription_and_breakdown_gate(self):
+        text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+        self.assertIn("--no-transcribe", text)
+        self.assertIn("video breakdown requires transcript readiness", text)
+
 
 class TransportErrorTests(unittest.TestCase):
     def test_media_download_disables_automatic_redirect_handling(self):

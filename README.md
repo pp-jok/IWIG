@@ -48,11 +48,11 @@ The first transcription can take longer because `faster-whisper` obtains its `sm
 ~/.iwig/.venv/bin/python scripts/iwig.py reindex ~/.iwig/output/<RUN_ID>
 ```
 
-`capture --json` and `enrich --json` emit exactly one JSON document on stdout. It includes capture, processing and index statuses, `readiness`, active errors, and artifact paths. The content package is the stable machine interface; `report.md` is only a human-readable summary. See [data contract](docs/data-contract.md), [analysis index](docs/analysis-index.md), and [downstream handoff](docs/downstream-handoff.md).
+Video capture transcribes the downloaded video locally by default. Use `capture --no-transcribe` only when a transcript is intentionally unnecessary. The first video capture can take longer while faster-whisper downloads its local `small` model. `capture --json` and `enrich --json` emit exactly one JSON document on stdout. It includes capture, processing and index statuses, `readiness`, active errors, and artifact paths. The content package is the stable machine interface; `report.md` is only a human-readable summary. See [data contract](docs/data-contract.md), [analysis index](docs/analysis-index.md), and [downstream handoff](docs/downstream-handoff.md).
 
 ## What one capture produces
 
-Each run is a self-contained directory under `~/.iwig/output/<RUN_ID>/`. It is safe to archive the directory as a content snapshot. `capture` only writes public capture and requested lightweight evidence; transcription is an explicit `enrich --transcribe` stage. If a later local step is interrupted, resume it with `enrich` without requesting the platform again.
+Each run is a self-contained directory under `~/.iwig/output/<RUN_ID>/`. It is safe to archive the directory as a content snapshot. A video `capture` includes local transcription by default; use `enrich --transcribe` to resume a failed or previously skipped transcript without requesting the platform again. Image notes remain transcript-free.
 
 | Path | When present | What it is for |
 | --- | --- | --- |
@@ -88,7 +88,7 @@ Each run is a self-contained directory under `~/.iwig/output/<RUN_ID>/`. It is s
 {"capture_status":"completed","processing_status":"partial","analysis_index_status":"failed","analysis_index":null}
 ```
 
-Exit code `2` means local processing is incomplete; it does not mean the collected public content is unusable. Downstream tools must consume `analysis_index` only when `analysis_index_status` is `completed`. `reindex` is local-only and never revisits the platform.
+Exit code `2` means local processing is incomplete; it does not mean the collected public content is unusable. Downstream tools must consume `analysis_index` only when `analysis_index_status` is `completed`. Video breakdown additionally requires `readiness.transcript` to be `ready`; a failed or unavailable transcript must block spoken-content claims. `reindex` is local-only and never revisits the platform.
 
 ## Output and boundaries
 

@@ -27,9 +27,11 @@ This creates `~/.iwig/.venv` and installs local dependencies. No OpenAI API key 
 
 Add `--keyframes --ocr` to extract up to 12 local representative frames and run macOS Vision OCR on the cover, image pages, and frames. OCR is optional and never uploads media.
 
-The command writes `content_package.json`, `report.md`, selected-note/request provenance, and directly exposed video, cover, or ordered images. It always archives `source/page.html` and `source/initial_state.json` so the package can be checked or reprocessed without another platform request. Capture never loads an ASR model.
+The command writes `content_package.json`, `report.md`, selected-note/request provenance, and directly exposed video, cover, or ordered images. It always archives `source/page.html` and `source/initial_state.json` so the package can be checked or reprocessed without another platform request.
 
-## Optional local enrichment
+For a downloaded video, capture also runs local faster-whisper transcription by default and writes the timestamped transcript artifacts. The first such capture may download the local `small` model and take longer. Pass `--no-transcribe` only when a transcript is intentionally unnecessary; this opt-out makes the video unsuitable for transcript-required breakdown until `enrich <RUN_ID> --transcribe` completes.
+
+## Optional local enrichment and transcript recovery
 
 ```bash
 ~/.iwig/.venv/bin/python scripts/iwig.py enrich <RUN_ID> --keyframes --ocr
@@ -38,7 +40,7 @@ The command writes `content_package.json`, `report.md`, selected-note/request pr
 ~/.iwig/.venv/bin/python scripts/iwig.py validate <RUN_ID>
 ```
 
-`--transcribe` uses local faster-whisper only when explicitly requested. The defaults (`small`, `zh`, CPU int8) suit a personal Mac; choose a smaller model or a different language when needed. IWIG does not install or invoke a visual-language model: frames, OCR, and visual candidates are evidence, not semantic recognition.
+`--transcribe` resumes a failed, skipped, or older video transcript locally. The defaults (`small`, `zh`, CPU int8) suit a personal Mac; choose a smaller model or a different language when needed. IWIG does not install or invoke a visual-language model: frames, OCR, and visual candidates are evidence, not semantic recognition.
 
 For a direct note URL, an existing package with the same note ID under the output directory is reused rather than downloaded again. Use `--run-dir` to explicitly continue working in a chosen directory.
 Pass `--force` to deliberately capture a fresh snapshot.
@@ -67,7 +69,7 @@ Read in this order:
 | `candidate_labels` | Optional structural hints only; verify against their `evidence_refs` before using them. |
 | `source/page.html`, `source/initial_state.json` | Local provenance and parser debugging; not a default input for qualitative breakdown. |
 
-Use `readiness` to bound the analysis. `ready` permits use; `partial` requires a stated caveat; `unavailable`, `failed`, `zero`, or `intentionally_omitted` must never be silently treated as positive evidence. IWIG performs collection and evidence organization only. Final content, audience, narrative, or performance analysis belongs to the downstream Skill.
+Use `readiness` to bound the analysis. `ready` permits use; `partial` requires a stated caveat; `unavailable`, `failed`, `zero`, or `intentionally_omitted` must never be silently treated as positive evidence. A video breakdown requires transcript readiness: it may proceed only when `readiness.transcript` is `ready`. IWIG performs collection and evidence organization only. Final content, audience, narrative, or performance analysis belongs to the downstream Skill.
 
 `status` equals `capture_status` and reflects only public capture. Local-stage aggregation is `processing_status`; failures are listed in `active_errors` and resolved failures remain in `error_history`. Reuse is based on a valid completed capture and verified primary media, never on OCR, ASR, or index success. A missing or failed index returns `analysis_index: null`; downstream Skills must then use the content package and state the material limitation. `reindex` never requests the platform and upgrades older v2 packages in memory, persisting compatibility fields on the next write.
 
@@ -78,5 +80,5 @@ Use `readiness` to bound the analysis. `ready` permits use; `partial` requires a
 - Stop on login, verification, rate limiting, missing public post data, or inaccessible content. Missing media produces a structured partial package so text-only or image-note facts remain usable.
 - Do not collect comments or replies. The report must state that comments were intentionally not collected.
 - Use only complete direct video and cover URLs exposed in the selected current-note object. Never invent a URL from a file ID, refresh a token, create a signature, or retry through a private endpoint.
-- Keep local ASR only for successfully downloaded media and only when `--transcribe` is requested. Do not use online transcription services.
+- Keep local ASR only for successfully downloaded media. Video capture requests it by default; `--no-transcribe` is the explicit opt-out. Do not use online transcription services.
 - OCR requires macOS Vision and may take longer on its first run while Swift compiles the local helper.
