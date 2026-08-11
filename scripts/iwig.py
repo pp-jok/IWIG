@@ -154,7 +154,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(prog="iwig"); sub = parser.add_subparsers(dest="command", required=True)
     setup = sub.add_parser("setup"); setup.add_argument("--home"); setup.add_argument("--dry-run", action="store_true")
     capture = sub.add_parser("capture")
-    capture.add_argument("--url", required=True); capture.add_argument("--output-dir", default=str(HOME / "output")); capture.add_argument("--run-dir"); capture.add_argument("--timeout", type=float, default=20); capture.add_argument("--max-video-mb", type=int, default=300); capture.add_argument("--force", action="store_true"); capture.add_argument("--keyframes", action="store_true"); capture.add_argument("--ocr", action="store_true"); capture.add_argument("--json", action="store_true")
+    capture.add_argument("--url", required=True); capture.add_argument("--output-dir", default=str(HOME / "output")); capture.add_argument("--run-dir"); capture.add_argument("--timeout", type=float, default=20); capture.add_argument("--max-video-mb", type=int, default=300); capture.add_argument("--force", action="store_true"); capture.add_argument("--keyframes", action="store_true"); capture.add_argument("--ocr", action="store_true"); capture.add_argument("--no-transcribe", action="store_true"); capture.add_argument("--json", action="store_true")
     enrich = sub.add_parser("enrich"); enrich.add_argument("run_dir"); enrich.add_argument("--keyframes", action="store_true"); enrich.add_argument("--ocr", action="store_true"); enrich.add_argument("--transcribe", action="store_true"); enrich.add_argument("--asr-model", default="small"); enrich.add_argument("--language", default="zh"); enrich.add_argument("--interpret", action="store_true"); enrich.add_argument("--describe-visuals", action="store_true"); enrich.add_argument("--json", action="store_true")
     for name in ("reindex", "validate"): sub.add_parser(name).add_argument("run_dir")
     migrate = sub.add_parser("migrate-legacy-home"); migrate.add_argument("--dry-run", action="store_true")
@@ -222,7 +222,7 @@ def main() -> int:
                 print("run_directory_identity_mismatch", file=sys.stderr); return 4
         except (OSError, json.JSONDecodeError):
             print("run_directory_identity_mismatch", file=sys.stderr); return 4
-    forwarded = ["--url", args.url, "--run-dir", str(run), "--timeout", str(args.timeout), "--max-video-mb", str(args.max_video_mb)] + (["--force"] if args.force else []) + (["--keyframes"] if args.keyframes else []) + (["--ocr"] if args.ocr else [])
+    forwarded = ["--url", args.url, "--run-dir", str(run), "--timeout", str(args.timeout), "--max-video-mb", str(args.max_video_mb)] + (["--force"] if args.force else []) + (["--keyframes"] if args.keyframes else []) + (["--ocr"] if args.ocr else []) + ([] if args.no_transcribe else ["--transcribe"])
     with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout): run_capture.main(forwarded)
     package, _ = migrate_content_package_in_memory(json.loads((run / "content_package.json").read_text(encoding="utf-8"))); _rebuild_index_safely(run, package)
     package, _ = migrate_content_package_in_memory(json.loads((run / "content_package.json").read_text(encoding="utf-8")))

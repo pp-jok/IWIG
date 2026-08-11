@@ -13,6 +13,11 @@ from content_package import atomic_write_json, new_content_package
 
 
 class IwigCliTests(unittest.TestCase):
+    def _write_captured_package(self, forwarded):
+        run = Path(forwarded[forwarded.index("--run-dir") + 1])
+        atomic_write_json(run / "content_package.json", new_content_package("completed", "https://example.test/n"))
+        return 0
+
     def test_capture_rejects_obsolete_raw_source_option(self):
         with patch.object(sys, "argv", ["iwig", "capture", "--url", "https://example.test/n", "--keep-raw-source"]):
             with self.assertRaises(SystemExit):
@@ -22,6 +27,20 @@ class IwigCliTests(unittest.TestCase):
         with patch.object(sys, "argv", ["iwig", "setup", "--dry-run"]), patch("setup.main", return_value=0) as setup:
             self.assertEqual(iwig.main(), 0)
             setup.assert_called_once_with(["--dry-run"])
+
+    def test_capture_transcribes_video_by_default(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(sys, "argv", ["iwig", "capture", "--url", "https://example.test/n", "--output-dir", temporary]), \
+                patch("iwig.run_capture.main", side_effect=self._write_captured_package) as capture:
+            self.assertEqual(iwig.main(), 0)
+        self.assertIn("--transcribe", capture.call_args.args[0])
+
+    def test_capture_no_transcribe_is_an_explicit_opt_out(self):
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(sys, "argv", ["iwig", "capture", "--url", "https://example.test/n", "--output-dir", temporary, "--no-transcribe"]), \
+                patch("iwig.run_capture.main", side_effect=self._write_captured_package) as capture:
+            self.assertEqual(iwig.main(), 0)
+        self.assertNotIn("--transcribe", capture.call_args.args[0])
 
     def test_index_failure_keeps_capture_completed_and_is_deduplicated(self):
         with tempfile.TemporaryDirectory() as temporary:
