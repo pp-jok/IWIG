@@ -248,14 +248,17 @@ class TransportErrorTests(unittest.TestCase):
                 _stream_download(client, "https://cdn.example/video.mp4", Path(temporary) / "video.mp4", 1024, "https://www.xiaohongshu.com/explore/a", "video")
         self.assertEqual(len(client.calls), 1)
 
-    def test_page_client_does_not_send_media_referer_to_short_links(self):
+    def test_page_client_uses_html_accept_header_without_media_referer(self):
         with tempfile.TemporaryDirectory() as temporary, \
              patch("httpx.Client") as client, \
              patch("public_html_provider._validate_url"), \
              patch("public_html_provider._get_public_page", side_effect=OSError("stop after client setup")):
             with self.assertRaisesRegex(PublicCaptureError, "public_page_request_failed"):
                 capture_public_note("http://xhslink.cn/o/example", Path(temporary))
-        self.assertEqual(client.call_args.kwargs["headers"], {"User-Agent": USER_AGENT})
+        self.assertEqual(client.call_args.kwargs["headers"], {
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        })
 
     def test_maps_transport_errors_to_a_reportable_public_error(self):
         mapped = request_error(OSError("dns unavailable"))
