@@ -90,6 +90,23 @@ def migrate_content_package_in_memory(package: dict) -> tuple[dict, list[str]]:
             upsert_active_error(migrated, stage=name, code="interrupted_or_unfinished")
         if isinstance(stage, dict) and stage.get("status") in {"failed", "partial"} and not any(item.get("stage") == name for item in migrated["active_errors"]):
             upsert_active_error(migrated, stage=name, code=f"{name}_failed")
+    derived = migrated.get("derived") or {}
+    frame_ids = {frame.get("path"): frame.get("id") for frame in derived.get("keyframes", []) if isinstance(frame, dict)}
+    empty_ocr_refs = {
+        f"ocr-{frame_ids[record.get('path')]}"
+        for record in (derived.get("ocr", {}) or {}).get("keyframes", []) or []
+        if isinstance(record, dict) and frame_ids.get(record.get("path")) and not record.get("text")
+    }
+    repaired_empty_ocr_refs = False
+    for segment in derived.get("evidence_segments", []) or []:
+        if isinstance(segment, dict) and isinstance(segment.get("ocr_refs"), list):
+            refs = segment["ocr_refs"]
+            filtered = [reference for reference in refs if reference not in empty_ocr_refs]
+            if len(filtered) != len(refs):
+                segment["ocr_refs"] = filtered
+                repaired_empty_ocr_refs = True
+    if repaired_empty_ocr_refs:
+        notes.append("repaired:empty_keyframe_ocr_refs")
     migrated["processing_status"] = compute_processing_status(migrated.get("processing") or {})
     unique_history, seen_history = [], set()
     for error in migrated["error_history"]:
@@ -536,7 +553,7 @@ def build_evidence_segments(transcript: list[dict], frames: list[dict], scene_ca
     frame_ocr_refs = {
         frame_ids_by_path.get(record.get("path")): f"ocr-{frame_ids_by_path[record.get('path')]}"
         for record in ocr.get("keyframes", []) or []
-        if frame_ids_by_path.get(record.get("path"))
+        if frame_ids_by_path.get(record.get("path")) and record.get("text")
     }
     records = []
     for number, speech in enumerate(transcript, 1):

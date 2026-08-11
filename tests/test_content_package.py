@@ -276,6 +276,32 @@ class ContentPackageTests(unittest.TestCase):
             with self.assertRaisesRegex(AnalysisIndexError, "unresolved_evidence_ref:evidence-001:frame_refs:frame-missing"):
                 build_analysis_index(run)
 
+    def test_empty_keyframe_ocr_does_not_create_unresolved_evidence_reference(self):
+        from content_package import build_evidence_segments
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary)
+            package = new_content_package("completed", "https://example.test/note")
+            package["transcript"] = [{"start": 0, "end": 1, "text": "口播"}]
+            package["derived"]["keyframes"] = [{"id": "frame-001", "path": "derived/keyframes/001.jpg", "time_seconds": 0.5}]
+            package["derived"]["ocr"]["keyframes"] = [{"path": "derived/keyframes/001.jpg", "text": ""}]
+            package["derived"]["evidence_segments"] = build_evidence_segments(
+                package["transcript"], package["derived"]["keyframes"], [], package["derived"]["ocr"],
+            )
+            (run / "content_package.json").write_text(json.dumps(package), encoding="utf-8")
+            index = build_analysis_index(run)
+        self.assertEqual(index["evidence_segments"][0]["ocr_refs"], [])
+
+    def test_analysis_index_repairs_legacy_empty_keyframe_ocr_reference(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary)
+            package = new_content_package("completed", "https://example.test/note")
+            package["derived"]["keyframes"] = [{"id": "frame-001", "path": "derived/keyframes/001.jpg", "time_seconds": 0.5}]
+            package["derived"]["ocr"]["keyframes"] = [{"path": "derived/keyframes/001.jpg", "text": ""}]
+            package["derived"]["evidence_segments"] = [{"id": "evidence-001", "ocr_refs": ["ocr-frame-001"]}]
+            (run / "content_package.json").write_text(json.dumps(package), encoding="utf-8")
+            index = build_analysis_index(run)
+        self.assertEqual(index["evidence_segments"][0]["ocr_refs"], [])
+
     def test_analysis_index_rejects_invalid_package_and_keeps_previous_output(self):
         with tempfile.TemporaryDirectory() as temporary:
             run = Path(temporary); (run / "derived").mkdir()
