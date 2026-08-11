@@ -195,6 +195,11 @@ def main() -> int:
     existing = None if args.run_dir or args.force else find_existing_package(root, note_id_from_url(args.url))
     if existing:
         package, _ = migrate_content_package_in_memory(json.loads((existing / "content_package.json").read_text(encoding="utf-8")))
+        transcript_stage = package.get("processing", {}).get("transcribe", {})
+        if not args.no_transcribe and package.get("media", {}).get("video") and transcript_stage.get("status") != "completed":
+            with contextlib.redirect_stdout(sys.stderr if args.json else sys.stdout):
+                run_capture.main(["--enrich-dir", str(existing), "--transcribe"])
+            package, _ = migrate_content_package_in_memory(json.loads((existing / "content_package.json").read_text(encoding="utf-8")))
         index_path = existing / "derived" / "analysis_index.json"
         needs_index = package.get("processing", {}).get("analysis_index", {}).get("status") != "completed" or not index_path.is_file()
         if not needs_index:

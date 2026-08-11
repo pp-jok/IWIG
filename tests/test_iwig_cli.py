@@ -109,3 +109,15 @@ class IwigCliTests(unittest.TestCase):
                     patch("iwig.write_analysis_index", side_effect=AnalysisIndexError("invalid package")), \
                     patch("iwig.run_capture.main", side_effect=AssertionError("must not recapture")):
                 self.assertEqual(iwig.main(), 2)
+
+    def test_cached_video_without_transcript_runs_local_asr_without_recapture(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            run = Path(temporary) / "cached"
+            package = new_content_package("completed", "https://example.test/n")
+            package["media"]["video"] = {"path": "media/video.mp4"}
+            atomic_write_json(run / "content_package.json", package)
+            with patch.object(sys, "argv", ["iwig", "capture", "--url", "https://example.test/n", "--output-dir", temporary]), \
+                    patch("iwig.find_existing_package", return_value=run), \
+                    patch("iwig.run_capture.main", return_value=0) as local_stage:
+                self.assertEqual(iwig.main(), 0)
+        self.assertEqual(local_stage.call_args.args[0], ["--enrich-dir", str(run), "--transcribe"])
